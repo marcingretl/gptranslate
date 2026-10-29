@@ -1,0 +1,15 @@
+# Changelog
+
+## [0.12.0] - 2026-10-29
+
+First public, experimental release.
+
+- C++17 gnuplot parser, plot IR and Matplotlib Python-source backend.
+- Coverage of the principal gretl plotting commands, with full `gridplot` compatibility remaining out of scope.
+- Translation of a broad set of libgretl and gretl function-package plots.
+- Named data blocks, matrix/image plots, palettes, fitted functions, filled curves, histograms, boxplots, multiple axes and positioned panels.
+- gretl4py plot queue and libgretl compatibility/version-probe handling.
+- Regression fixtures and tests for BACE, ParMA, SVAR, BVAR and core plotting constructs.
+- Automatic contrasting colors for multi-series plots, with opt-out.
+
+Earlier development milestones (0.4–0.11.11) were internal iterations before this public release. See Git history for details when available.

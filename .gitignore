@@ -1,0 +1,21 @@
+# Meson and local builds
+/build/
+/build-*/
+/dist/
+/meson-logs/
+/meson-private/
+/meson-info/
+
+# Python caches and generated plots
+__pycache__/
+*.pyc
+*.pyo
+*.png
+*.svg
+*.pdf
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*~

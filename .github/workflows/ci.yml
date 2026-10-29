@@ -1,0 +1,23 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build g++ python3 python3-numpy python3-matplotlib
+      - name: Configure
+        run: meson setup build --buildtype=debug
+      - name: Build
+        run: meson compile -C build
+      - name: Test
+        env:
+          MPLBACKEND: Agg
+        run: meson test -C build --print-errorlogs

@@ -1,0 +1,3 @@
+gpver = sprintf("%.1f.%s", GPVAL_VERSION, GPVAL_PATCHLEVEL)
+set print "gpver.txt"
+print gpver

@@ -1,0 +1,44 @@
+# gptranslate: C++17 formatting rules.
+# Keep this file at the repository root.
+# Formatting changes only whitespace and layout; it does not add braces,
+# explain algorithms, or replace a code review.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+# Four-space indentation, no tabs.
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+
+# Function calls/declarations: foo(), not foo (). Control flow: if (...).
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpaceBeforeAssignmentOperators: true
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Braces stay on the line of the controlling statement or declaration.
+BreakBeforeBraces: Attach
+# Do not compress independent statements or control-flow bodies into one line.
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: false
+
+# Readable argument lists and bounded line length.
+ColumnLimit: 100
+BinPackArguments: false
+BinPackParameters: false
+AlignOperands: AlignAfterOperator
+
+# Preserve intentional ordering and existing comment text/layout.
+SortIncludes: Never
+ReflowComments: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
