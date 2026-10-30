@@ -625,7 +625,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "fig.tight_layout()\n";
     }
     // The generated script is interactive; execution is owned by the caller.
-    o << "plt.show()\n";
+    // Embedded callers can manage display themselves via --no-show.
+    if (show_) {
+        o << "plt.show()\n";
+    }
     return o.str();
 }
 } // namespace gptranslate

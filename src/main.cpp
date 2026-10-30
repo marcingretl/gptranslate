@@ -90,6 +90,8 @@ int main(int argc, char** argv) {
         std::string input;
         std::string output;
         bool persist = false;
+        // Let embedding applications control when figures are displayed.
+        bool show = true;
         bool auto_contrast = true;
         bool contrast_cli_override = false;
         for (int i = 1; i < argc; ++i) {
@@ -108,6 +110,9 @@ int main(int argc, char** argv) {
                 // libgretl uses -persist for interactive plots.
                 persist = true;
                 continue;
+            } else if (arg == "--no-show") {
+                show = false;
+                continue;
             } else if (arg == "--emit-python") {
                 // Accepted for compatibility with gptranslate 0.3.
                 continue;
@@ -120,7 +125,8 @@ int main(int argc, char** argv) {
                 output = arg.substr(9);
             } else if (arg == "--help") {
                 std::cout << "gp-executor [--output=SCRIPT.py] "
-                             "[--auto-contrast|--no-auto-contrast] [-persist] [script.gp]\n"
+                             "[--auto-contrast|--no-auto-contrast] [--no-show] "
+                             "[-persist] [script.gp]\n"
                              "Translate gnuplot source to Python/matplotlib; never execute "
                              "it.\n";
                 return 0;
@@ -183,7 +189,7 @@ int main(int argc, char** argv) {
             else if (value == "1")
                 auto_contrast = true;
         }
-        gptranslate::MatplotlibBackend backend(auto_contrast);
+        gptranslate::MatplotlibBackend backend(auto_contrast, show);
         const std::string python = backend.generate(result.document);
         // Queue only libgretl's interactive invocations. Explicit --output
         // and standalone translation retain their previous behavior.

@@ -28,11 +28,14 @@ class Backend {
 class MatplotlibBackend final : public Backend {
   public:
     // Readability mode is enabled by default for combined plots.
-    explicit MatplotlibBackend(bool auto_contrast = true) : auto_contrast_(auto_contrast) {
+    explicit MatplotlibBackend(bool auto_contrast = true, bool show = true)
+        : auto_contrast_(auto_contrast), show_(show) {
     }
     std::string generate(const Document& document) const override;
 
   private:
     bool auto_contrast_ = false;
+    // Emit plt.show() only for scripts that manage their own display.
+    bool show_ = true;
 };
 } // namespace gptranslate
