@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added `--no-show` to omit the final `plt.show()` from generated Matplotlib scripts. By default, generated scripts still include `plt.show()`.
+- This option lets an embedding application such as gretl4py control figure display itself. Display behavior in non-interactive scripts and on Windows/TkAgg is still under investigation; no change to plot-queue handling is claimed.
+
 ## [0.12.0] - 2026-10-29
 
 First public, experimental release.

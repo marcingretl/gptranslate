@@ -68,6 +68,14 @@ Select a Python output file explicitly:
 python3 /tmp/passengers.py
 ```
 
+By default, the generated Python script includes `plt.show()`. For integration with applications that create and manage Matplotlib figures themselves, use `--no-show`:
+
+```sh
+./build/gp-executor --no-show --output=/tmp/passengers.py tests/passengers.gp
+```
+
+The resulting script creates the figure without calling `plt.show()`; the embedding application is responsible for displaying it and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script. The option does not itself fix Windows/TkAgg window-lifetime issues.
+
 The translator also reads gnuplot input from standard input when no input filename is supplied:
 
 ```sh
@@ -79,6 +87,7 @@ The translator also reads gnuplot input from standard input when no input filena
 | Option | Effect |
 | --- | --- |
 | `--output=FILE.py` | Write the translated Python source to `FILE.py` |
+| `--no-show` | Omit the final `plt.show()` in generated Python; the caller must manage display |
 | `--auto-contrast` | Enable automatic contrasting colors for combined plots |
 | `--no-auto-contrast` | Preserve original plot colors |
 | `-persist` | Compatibility flag; enables queue publication when configured |
