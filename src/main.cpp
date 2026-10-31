@@ -92,8 +92,8 @@ int main(int argc, char** argv) {
         bool persist = false;
         // Let embedding applications control when figures are displayed.
         bool show = true;
-        // QtAgg is opt-in; the embedding application selects when to request it.
-        bool qtagg = false;
+        // An empty backend leaves Matplotlib's default backend selection unchanged.
+        std::string backend_name;
         bool auto_contrast = true;
         bool contrast_cli_override = false;
         for (int i = 1; i < argc; ++i) {
@@ -115,9 +115,20 @@ int main(int argc, char** argv) {
             } else if (arg == "--no-show") {
                 show = false;
                 continue;
+            } else if (arg == "--backend") {
+                // Pass a Matplotlib backend name through to the generated Python.
+                if (++i >= argc || argv[i][0] == '-') {
+                    throw std::runtime_error("--backend requires a backend name (or an empty string)");
+                }
+                backend_name = argv[i];
+                continue;
+            } else if (arg.rfind("--backend=", 0) == 0) {
+                // --backend= without a value restores Matplotlib's own default.
+                backend_name = arg.substr(10);
+                continue;
             } else if (arg == "--qtagg") {
-                // Request the PySide6/QtAgg import header in generated Python.
-                qtagg = true;
+                // Backward-compatible alias for the original QtAgg option.
+                backend_name = "QtAgg";
                 continue;
             } else if (arg == "--emit-python") {
                 // Accepted for compatibility with gptranslate 0.3.
@@ -131,8 +142,8 @@ int main(int argc, char** argv) {
                 output = arg.substr(9);
             } else if (arg == "--help") {
                 std::cout << "gp-executor [--output=SCRIPT.py] "
-                             "[--auto-contrast|--no-auto-contrast] [--no-show] [--qtagg] "
-                             "[-persist] [script.gp]\n"
+                             "[--auto-contrast|--no-auto-contrast] [--no-show] "
+                             "[--backend=NAME] [-persist] [script.gp]\n"
                              "Translate gnuplot source to Python/matplotlib; never execute "
                              "it.\n";
                 return 0;
@@ -195,7 +206,7 @@ int main(int argc, char** argv) {
             else if (value == "1")
                 auto_contrast = true;
         }
-        gptranslate::MatplotlibBackend backend(auto_contrast, show, qtagg);
+        gptranslate::MatplotlibBackend backend(auto_contrast, show, backend_name);
         const std::string python = backend.generate(result.document);
         // Queue only libgretl's interactive invocations. Explicit --output
         // and standalone translation retain their previous behavior.

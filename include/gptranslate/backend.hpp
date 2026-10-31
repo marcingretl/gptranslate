@@ -19,6 +19,7 @@
 #pragma once
 #include "plot.hpp"
 #include <string>
+#include <utility>
 namespace gptranslate {
 class Backend {
   public:
@@ -28,8 +29,9 @@ class Backend {
 class MatplotlibBackend final : public Backend {
   public:
     // Readability mode is enabled by default for combined plots.
-    explicit MatplotlibBackend(bool auto_contrast = true, bool show = true, bool qtagg = false)
-        : auto_contrast_(auto_contrast), show_(show), qtagg_(qtagg) {
+    explicit MatplotlibBackend(bool auto_contrast = true, bool show = true,
+                               std::string backend_name = "")
+        : auto_contrast_(auto_contrast), show_(show), backend_name_(std::move(backend_name)) {
     }
     std::string generate(const Document& document) const override;
 
@@ -37,7 +39,7 @@ class MatplotlibBackend final : public Backend {
     bool auto_contrast_ = false;
     // Emit plt.show() only for scripts that manage their own display.
     bool show_ = true;
-    // Select PySide6/QtAgg in the generated Python only when explicitly requested.
-    bool qtagg_ = false;
+    // Empty means no explicit Matplotlib backend selection in generated Python.
+    std::string backend_name_;
 };
 } // namespace gptranslate

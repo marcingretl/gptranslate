@@ -35,7 +35,7 @@ These are **tested capabilities, not a claim of complete gnuplot compatibility**
 
 **Build:** C++17 compiler, Meson, Ninja (or another Meson-supported build backend), Python 3 for the test suite. Older libstdc++ installations may require `-lstdc++fs`; Meson detects this.
 
-**Rendering translated scripts:** Python 3 with Matplotlib and the packages imported by the generated script (typically NumPy). Matplotlib is **not required to run the translator itself**. When `--qtagg` is used, the Python environment that executes the generated script must also have **PySide6** installed and support a graphical Qt session.
+**Rendering translated scripts:** Python 3 with Matplotlib and the packages imported by the generated script (typically NumPy). Matplotlib is **not required to run the translator itself**. When `--backend=QtAgg` is used, the Python environment that executes the generated script must also have **PySide6** installed and support a graphical Qt session. Other backends may have their own runtime dependencies.
 
 ## Build and test
 
@@ -76,13 +76,13 @@ By default, the generated Python script includes `plt.show()`. For integration w
 
 The resulting script creates the figure without calling `plt.show()`; the embedding application is responsible for displaying it and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script. The option does not itself fix Windows/TkAgg window-lifetime issues.
 
-To select the **QtAgg backend using PySide6** in the generated Python (for example, when testing plot-window behavior on Windows), use `--qtagg`:
+To explicitly select a **Matplotlib backend** in the generated Python, use `--backend=NAME`. For example, to select **QtAgg using PySide6** when testing plot-window behavior on Windows:
 
 ```sh
-./build/gp-executor --qtagg --output=/tmp/passengers.py tests/passengers.gp
+./build/gp-executor --backend=QtAgg --output=/tmp/passengers.py tests/passengers.gp
 ```
 
-This prepends the following imports before `matplotlib.pyplot`:
+For QtAgg, this prepends the following imports before `matplotlib.pyplot`:
 
 ```python
 from PySide6 import QtCore
@@ -91,7 +91,9 @@ matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 ```
 
-`--qtagg` is opt-in on every platform; gretl4py may choose to pass it only on Windows. It can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
+Other backend names, such as `TkAgg` or the non-interactive `Agg`, are passed directly to `matplotlib.use()` without importing PySide6. For example, `--backend=Agg` generates `matplotlib.use('Agg')` before importing `pyplot`. This option can also be written as `--backend NAME`; `--backend=""` is equivalent to omitting the option and leaves backend selection to Matplotlib.
+
+`--backend` is opt-in on every platform; gretl4py may choose `--backend=QtAgg` only on Windows. The old `--qtagg` flag is retained as a backward-compatible alias for `--backend=QtAgg`. Backend selection can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
 
 The translator also reads gnuplot input from standard input when no input filename is supplied:
 
@@ -105,7 +107,8 @@ The translator also reads gnuplot input from standard input when no input filena
 | --- | --- |
 | `--output=FILE.py` | Write the translated Python source to `FILE.py` |
 | `--no-show` | Omit the final `plt.show()` in generated Python; the caller must manage display |
-| `--qtagg` | Prepend PySide6 and QtAgg backend selection before importing `matplotlib.pyplot` |
+| `--backend=NAME` | Select a Matplotlib backend in the generated Python (`QtAgg`, `TkAgg`, `Agg`, etc.); empty means default |
+| `--qtagg` | Backward-compatible alias for `--backend=QtAgg` |
 | `--auto-contrast` | Enable automatic contrasting colors for combined plots |
 | `--no-auto-contrast` | Preserve original plot colors |
 | `-persist` | Compatibility flag; enables queue publication when configured |

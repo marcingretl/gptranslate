@@ -78,8 +78,8 @@ test('parma-plateau', py, args: [meson.current_source_dir() / 'tests' / 'check_p
 # Filled histograms stay below density curves regardless of plotting order.
 test('parma-zorder', py, args: [meson.current_source_dir() / 'tests' / 'check_zorder.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'parma-kernel.gp'])
 
-# Backend selection is opt-in and must precede pyplot without requiring PySide6 for translation tests.
-test('qtagg-header', py, args: [meson.current_source_dir() / 'tests' / 'check_qtagg.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'basic.gp'])
+# Backend selection is opt-in and must precede pyplot without requiring GUI toolkits for translation tests.
+test('backend-header', py, args: [meson.current_source_dir() / 'tests' / 'check_backend.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'basic.gp'])
 
 # Auto-contrast defaults on for combined plots and supports explicit opt-out.
 test('auto-contrast', py, args: [meson.current_source_dir() / 'tests' / 'check_auto_contrast.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'parma-kernel.gp'])

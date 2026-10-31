@@ -168,12 +168,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         throw std::runtime_error("no plots");
     }
     std::ostringstream o;
-    if (qtagg_) {
-        // Preload PySide6 and select QtAgg before importing pyplot.
+    if (!backend_name_.empty()) {
+        // Select the requested backend before importing pyplot.
         // This affects the generated script, not the translator process.
-        o << "from PySide6 import QtCore\n";
+        if (backend_name_ == "QtAgg") {
+            // Preserve PySide6 selection for the previously supported QtAgg mode.
+            o << "from PySide6 import QtCore\n";
+        }
         o << "import matplotlib\n";
-        o << "matplotlib.use('QtAgg')\n";
+        o << "matplotlib.use(" << pystr(backend_name_) << ")\n";
     }
     o << "import matplotlib.pyplot as plt\n";
     o << "from matplotlib.ticker import MultipleLocator, FixedLocator, "

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added opt-in `--qtagg` to emit a PySide6/QtAgg selection header before importing `matplotlib.pyplot`. It can be combined with `--no-show` and does not change default output or plot-queue behavior. A working Qt event loop is still required for non-blocking GUI display.
+- Generalized backend selection to `--backend=NAME`, which emits `matplotlib.use(NAME)` before importing `pyplot`. An empty backend preserves Matplotlib's default. `--backend=QtAgg` still preloads PySide6 as before; `--qtagg` remains a compatibility alias. This can be combined with `--no-show` and does not change default output or plot-queue behavior. A working GUI event loop is still required for non-blocking display.
 - Added `--no-show` to omit the final `plt.show()` from generated Matplotlib scripts. By default, generated scripts still include `plt.show()`.
 - This option lets an embedding application such as gretl4py control figure display itself. Display behavior in non-interactive scripts and on Windows/TkAgg is still under investigation; no change to plot-queue handling is claimed.
 
