@@ -35,7 +35,7 @@ These are **tested capabilities, not a claim of complete gnuplot compatibility**
 
 **Build:** C++17 compiler, Meson, Ninja (or another Meson-supported build backend), Python 3 for the test suite. Older libstdc++ installations may require `-lstdc++fs`; Meson detects this.
 
-**Rendering translated scripts:** Python 3 with Matplotlib and the packages imported by the generated script (typically NumPy). Matplotlib is **not required to run the translator itself**.
+**Rendering translated scripts:** Python 3 with Matplotlib and the packages imported by the generated script (typically NumPy). Matplotlib is **not required to run the translator itself**. When `--qtagg` is used, the Python environment that executes the generated script must also have **PySide6** installed and support a graphical Qt session.
 
 ## Build and test
 
@@ -76,6 +76,23 @@ By default, the generated Python script includes `plt.show()`. For integration w
 
 The resulting script creates the figure without calling `plt.show()`; the embedding application is responsible for displaying it and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script. The option does not itself fix Windows/TkAgg window-lifetime issues.
 
+To select the **QtAgg backend using PySide6** in the generated Python (for example, when testing plot-window behavior on Windows), use `--qtagg`:
+
+```sh
+./build/gp-executor --qtagg --output=/tmp/passengers.py tests/passengers.gp
+```
+
+This prepends the following imports before `matplotlib.pyplot`:
+
+```python
+from PySide6 import QtCore
+import matplotlib
+matplotlib.use('QtAgg')
+import matplotlib.pyplot as plt
+```
+
+`--qtagg` is opt-in on every platform; gretl4py may choose to pass it only on Windows. It can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
+
 The translator also reads gnuplot input from standard input when no input filename is supplied:
 
 ```sh
@@ -88,6 +105,7 @@ The translator also reads gnuplot input from standard input when no input filena
 | --- | --- |
 | `--output=FILE.py` | Write the translated Python source to `FILE.py` |
 | `--no-show` | Omit the final `plt.show()` in generated Python; the caller must manage display |
+| `--qtagg` | Prepend PySide6 and QtAgg backend selection before importing `matplotlib.pyplot` |
 | `--auto-contrast` | Enable automatic contrasting colors for combined plots |
 | `--no-auto-contrast` | Preserve original plot colors |
 | `-persist` | Compatibility flag; enables queue publication when configured |
