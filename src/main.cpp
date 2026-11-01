@@ -126,10 +126,6 @@ int main(int argc, char** argv) {
                 // --backend= without a value restores Matplotlib's own default.
                 backend_name = arg.substr(10);
                 continue;
-            } else if (arg == "--qtagg") {
-                // Backward-compatible alias for the original QtAgg option.
-                backend_name = "QtAgg";
-                continue;
             } else if (arg == "--emit-python") {
                 // Accepted for compatibility with gptranslate 0.3.
                 continue;

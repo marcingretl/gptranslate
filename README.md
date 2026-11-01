@@ -93,7 +93,7 @@ import matplotlib.pyplot as plt
 
 Other backend names, such as `TkAgg` or the non-interactive `Agg`, are passed directly to `matplotlib.use()` without importing PySide6. For example, `--backend=Agg` generates `matplotlib.use('Agg')` before importing `pyplot`. This option can also be written as `--backend NAME`; `--backend=""` is equivalent to omitting the option and leaves backend selection to Matplotlib.
 
-`--backend` is opt-in on every platform; gretl4py may choose `--backend=QtAgg` only on Windows. The old `--qtagg` flag is retained as a backward-compatible alias for `--backend=QtAgg`. Backend selection can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
+`--backend` is opt-in on every platform; gretl4py may choose `--backend=QtAgg` only on Windows. Backend selection can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
 
 The translator also reads gnuplot input from standard input when no input filename is supplied:
 
@@ -108,7 +108,6 @@ The translator also reads gnuplot input from standard input when no input filena
 | `--output=FILE.py` | Write the translated Python source to `FILE.py` |
 | `--no-show` | Omit the final `plt.show()` in generated Python; the caller must manage display |
 | `--backend=NAME` | Select a Matplotlib backend in the generated Python (`QtAgg`, `TkAgg`, `Agg`, etc.); empty means default |
-| `--qtagg` | Backward-compatible alias for `--backend=QtAgg` |
 | `--auto-contrast` | Enable automatic contrasting colors for combined plots |
 | `--no-auto-contrast` | Preserve original plot colors |
 | `-persist` | Compatibility flag; enables queue publication when configured |

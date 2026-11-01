@@ -28,19 +28,16 @@ with tempfile.TemporaryDirectory() as tmp:
               "import matplotlib\n"
               "matplotlib.use('QtAgg')\n"
               "import matplotlib.pyplot as plt\n")
-    qtagg = generate('--backend=QtAgg')
-    assert qtagg.startswith(header)
-    assert qtagg.endswith('plt.show()\n')
-    assert qtagg[len(header):] == default[len('import matplotlib.pyplot as plt\n'):]
-
-    # The historical switch still selects the same QtAgg/PySide6 header.
-    assert generate('--qtagg') == qtagg
+    qt_agg = generate('--backend=QtAgg')
+    assert qt_agg.startswith(header)
+    assert qt_agg.endswith('plt.show()\n')
+    assert qt_agg[len(header):] == default[len('import matplotlib.pyplot as plt\n'):]
 
     # Backend selection and display suppression are independent options.
-    qtagg_no_show = generate('--backend=QtAgg', '--no-show')
-    assert qtagg_no_show.startswith(header)
-    assert 'plt.show()' not in qtagg_no_show
-    assert qtagg_no_show == qtagg.removesuffix('plt.show()\n')
+    qt_agg_no_show = generate('--backend=QtAgg', '--no-show')
+    assert qt_agg_no_show.startswith(header)
+    assert 'plt.show()' not in qt_agg_no_show
+    assert qt_agg_no_show == qt_agg.removesuffix('plt.show()\n')
 
     # Other Matplotlib backends do not load Qt or PySide6.
     for name in ('TkAgg', 'Agg'):
