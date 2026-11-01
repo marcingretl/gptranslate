@@ -722,6 +722,15 @@ ParseResult parse(const std::string& source) {
                 }
                 continue;
             }
+            // Border visibility shares the bitmask used by `set border N`.
+            if (s == "unset border") {
+                p->border = 0;
+                continue;
+            }
+            if (s == "set border") {
+                p->border = 15;
+                continue;
+            }
             if (starts(s, "set border ")) {
                 std::istringstream bs(s.substr(11));
                 bs >> p->border;
@@ -740,8 +749,26 @@ ParseResult parse(const std::string& source) {
                 p->xzeroaxis = true;
                 continue;
             }
-            if (s == "unset xzeroaxis") {
+            if (s == "unset xzeroaxis" || s == "set noxzeroaxis") {
                 p->xzeroaxis = false;
+                continue;
+            }
+            // `yzeroaxis` is the vertical reference axis x=0 (not y=0).
+            if (s == "set yzeroaxis") {
+                p->yzeroaxis = true;
+                continue;
+            }
+            if (s == "unset yzeroaxis" || s == "set noyzeroaxis") {
+                p->yzeroaxis = false;
+                continue;
+            }
+            // A polar plot's inline columns contain theta (radians) and r.
+            if (s == "set polar") {
+                p->polar = true;
+                continue;
+            }
+            if (s == "unset polar" || s == "set nopolar") {
+                p->polar = false;
                 continue;
             }
             // Boxplots from libgretl suppress numeric x tics and place labels
@@ -752,6 +779,15 @@ ParseResult parse(const std::string& source) {
             }
             if (s == "set xtics") {
                 p->xtics_disabled = false;
+                continue;
+            }
+            // Also accept gretl's alternate `set noytics` spelling.
+            if (s == "unset ytics" || s == "set noytics") {
+                p->ytics_disabled = true;
+                continue;
+            }
+            if (s == "set ytics") {
+                p->ytics_disabled = false;
                 continue;
             }
             if (starts(s, "set label ")) {
@@ -852,6 +888,12 @@ ParseResult parse(const std::string& source) {
                     d.width = std::stoi(m[1]);
                     d.height = std::stoi(m[2]);
                 }
+                continue;
+            }
+            // Square axes are independent of the normalized size of a
+            // multiplot panel; do not treat `square` as two numeric dimensions.
+            if (s == "set size square") {
+                p->square = true;
                 continue;
             }
             // The size and origin settings describe the next panel in normalized
@@ -969,10 +1011,12 @@ ParseResult parse(const std::string& source) {
             // Axis tic definitions and secondary-axis tic intervals are general plot
             // settings.
             if (starts(s, "set xtics ")) {
+                p->xtics_disabled = false;
                 parse_tics(p->x.tics, trim(s.substr(10)));
                 continue;
             }
             if (starts(s, "set ytics ")) {
+                p->ytics_disabled = false;
                 parse_tics(p->y.tics, trim(s.substr(10)));
                 continue;
             }

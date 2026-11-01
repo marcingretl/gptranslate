@@ -117,7 +117,11 @@ struct Plot {
         bool centered{false};
     };
     std::vector<Label> labels;
-    bool xtics_disabled{false};
+    bool xtics_disabled{false}, ytics_disabled{false};
+    // Polar data columns are angle (radians) and radius, not Cartesian x/y.
+    bool polar{false};
+    // `set size square` fixes the axes geometry, unlike a multiplot panel size.
+    bool square{false};
     // Gnuplot multiplot placement, normalized to the figure dimensions.
     double origin_x{0.0}, origin_y{0.0};
     double size_x{1.0}, size_y{1.0};
@@ -135,7 +139,7 @@ struct Plot {
     std::string legend_horizontal{"right"}, legend_vertical{"center"};
     // Gnuplot colorbox visibility applies to palette-based matrix images.
     bool colorbox{true};
-    bool mirror_tics{true}, xzeroaxis{false};
+    bool mirror_tics{true}, xzeroaxis{false}, yzeroaxis{false};
     // Approximate gnuplot solid fill density for box-style plots.
     double fill_alpha{1.0};
     // Gnuplot rowstacked histograms accumulate each row across series.

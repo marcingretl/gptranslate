@@ -286,6 +286,13 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             }
             o << "target = " << (s.yaxis == 2 ? "ax2" : "ax") << "\n";
             o << "x = " << numbers(s.points, true) << "\ny = " << numbers(s.points, false) << "\n";
+            if (p.polar && !s.constant_y && !s.analytic_y) {
+                // Convert gnuplot theta/r data to Cartesian coordinates on the
+                // ordinary Matplotlib axes (as used by libgretl's root plots).
+                o << "import math\n";
+                o << "x, y = ([radius * math.cos(theta) for theta, radius in zip(x, y)], "
+                     "[radius * math.sin(theta) for theta, radius in zip(x, y)])\n";
+            }
             o << "kw = {'label': " << (s.title.empty() ? "'_nolegend_'" : pystr(s.title)) << "}";
             // All layers of a libgretl boxplot share one color, including
             // the median and the two dotted notch boundaries.
@@ -314,6 +321,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "kw['linestyle'] = '--'\n";
             }
             if (s.analytic_y) {
+                // The analytic-function translator currently uses Cartesian x.
+                // Never silently misrepresent a polar function as y = f(x).
+                if (p.polar)
+                    throw std::runtime_error("polar analytic functions are not supported");
                 // Sample a validated analytic function over the specified x range.
                 // math functions are evaluated pointwise; invalid domain points become
                 // NaN.
@@ -349,7 +360,18 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 if (s.style != Style::Lines) {
                     throw std::runtime_error("unsupported constant function style");
                 }
-                o << "target.axhline(" << std::setprecision(17) << *s.constant_y << ", **kw)\n";
+                if (p.polar) {
+                    // In polar mode `plot 1` means r=1: a unit circle, not
+                    // a horizontal line. Closing the sampled curve avoids a gap.
+                    o << "import math\n";
+                    o << "_gp_angles = [2 * math.pi * i / 360 for i in range(361)]\n";
+                    o << "target.plot([" << std::setprecision(17) << *s.constant_y
+                      << " * math.cos(theta) for theta in _gp_angles], [" << *s.constant_y
+                      << " * math.sin(theta) for theta in _gp_angles], zorder=3, **kw)\n";
+                } else {
+                    o << "target.axhline(" << std::setprecision(17) << *s.constant_y
+                      << ", **kw)\n";
+                }
                 continue;
             }
             switch (s.style) {
@@ -547,6 +569,19 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "    ax.axhline(0, color='gray', linewidth=0.7, zorder=0)\n";
             o << "    ax.set_ylim(_gp_ymin, _gp_ymax)\n";
         }
+        if (p.yzeroaxis) {
+            // Likewise the vertical x=0 reference line must not change x limits.
+            o << "_gp_xmin, _gp_xmax = ax.get_xlim()\n";
+            o << "if _gp_xmin <= 0 <= _gp_xmax:\n";
+            o << "    ax.axvline(0, color='gray', linewidth=0.7, zorder=0)\n";
+            o << "    ax.set_xlim(_gp_xmin, _gp_xmax)\n";
+        }
+        if (p.square) {
+            // Keep the axes box square and Cartesian units equally scaled, even
+            // when the document's terminal or multiplot panel is rectangular.
+            o << "ax.set_box_aspect(1)\n";
+            o << "ax.set_aspect('equal', adjustable='datalim')\n";
+        }
         // Gnuplot labels may use either data or axes-relative graph coordinates.
         for (const auto& label : p.labels) {
             o << "ax.text(" << std::setprecision(17) << label.x << ", " << label.y << ", "
@@ -556,12 +591,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << ", transform=ax.transAxes";
             o << ")\n";
         }
-        if (p.xtics_disabled)
-            o << "ax.set_xticks([])\n";
         // Apply named ticks to primary axes. Secondary x/y tic axes are
         // independent.
         emit_tics(o, p.x.tics, "x", "ax", p.xdata_time && p.timefmt == "%s");
         emit_tics(o, p.y.tics, "y", "ax");
+        // Unsetting tics wins over any earlier explicit interval or formatter.
+        if (p.xtics_disabled)
+            o << "ax.set_xticks([])\n";
+        if (p.ytics_disabled)
+            o << "ax.set_yticks([])\n";
         if (p.x2.tics.enabled) {
             o << "top_ax = ax.secondary_xaxis('top')\n";
             emit_tics(o, p.x2.tics, "x", "top_ax");

@@ -124,6 +124,7 @@ When `GRETL4PY_PLOT_QUEUE` points to an **existing directory**, a `-persist` inv
 
 ## Scope and limitations
 
+- VAR inverse-roots plots are supported: `set polar` interprets inline columns as `(theta, r)` in radians, and `plot 1` draws the unit circle on Cartesian Matplotlib axes. Border/tic suppression, zero reference axes and square plot geometry are also supported more generally. Analytic polar functions and the full gnuplot polar language are not yet supported.
 - gptranslate is **not** a general-purpose gnuplot replacement. Its compatibility target is libgretl and selected gretl package output.
 - The full behavior of gretl's `gridplot` is **not yet guaranteed**. Some grid-style scripts translate, but complete support requires further work.
 - Complex expressions, terminal-specific commands, layouts, and uncommon gnuplot features may be unsupported. Parser warnings/errors should be reviewed rather than ignored.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added general support for `unset border`, `set yzeroaxis`, `unset ytics`/`set noytics`, `set size square` and `set polar` in the plot IR and Matplotlib backend. Polar inline data (theta in radians, radius) render in Cartesian coordinates, while a constant polar function draws a circle; polar analytic functions remain unsupported.
+- Added headless VAR inverse-roots regression coverage for geometry, axes and tic resetting; the panplot-stack runtime test now uses `--no-show`.
 - Replaced the experimental Qt-only option with `--backend=NAME`, which emits `matplotlib.use(NAME)` before importing `pyplot`; the old switch is no longer accepted. An empty backend preserves Matplotlib's default. `--backend=QtAgg` continues to preload PySide6. This can be combined with `--no-show` and does not change default output or plot-queue behavior. A working GUI event loop is still required for non-blocking display.
 - Added `--no-show` to omit the final `plt.show()` from generated Matplotlib scripts. By default, generated scripts still include `plt.show()`.
 - This option lets an embedding application such as gretl4py control figure display itself. Display behavior in non-interactive scripts and on Windows/TkAgg is still under investigation; no change to plot-queue handling is claimed.
