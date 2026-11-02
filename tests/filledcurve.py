@@ -3,6 +3,9 @@ from matplotlib.ticker import MultipleLocator, FixedLocator, FormatStrFormatter,
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.ticker import FuncFormatter
 from datetime import datetime, timezone
+import math
+from matplotlib.collections import PathCollection
+_gp_hover_artists = []
 fig, axes = plt.subplots(1, 1, squeeze=False, figsize=(8,6), dpi=100)
 axes = axes.flatten()
 ax = axes[0]
@@ -23,7 +26,8 @@ y = [11.63255023,11.60415248,11.58152067,11.60184741,11.5863049,11.6044985700000
 kw = {'label': 'LRM'}
 kw['color'] = '#FF0000'
 kw['linewidth'] = 1.5
-target.scatter(x, y, s=18, **kw)
+_gp_hover_artist = target.scatter(x, y, s=18, **kw)
+_gp_hover_artists.append(_gp_hover_artist)
 for side, bit in [('bottom',1),('left',2),('top',4),('right',8)]:
     ax.spines[side].set_visible(bool(15 & bit))
 ax.set_title('')
@@ -33,4 +37,85 @@ ax.set_xlim(left=1973.6624999999999)
 ax.set_xlim(right=1987.8375000000001)
 for ax in axes[1:]: ax.set_visible(False)
 fig.tight_layout()
+
+def _gp_install_hover(figure, artists):
+    # Keep each callback's figure and artists local. In gretl4py, successive
+    # eval_file() calls may otherwise overwrite shared Python globals.
+    annotations = {}
+
+    def _gp_on_hover(event):
+        # Inspect only visible point artists in the axes under the mouse.
+        # The reverse order gives the topmost (most recently plotted) series priority.
+        hit = None
+        if event.inaxes is not None:
+            for artist in reversed(artists):
+                if artist.axes is not event.inaxes or not artist.get_visible():
+                    continue
+                contains, details = artist.contains(event)
+                if not contains:
+                    continue
+                indices = details.get('ind', ())
+                if len(indices) == 0:
+                    continue
+
+                # scatter() stores offsets; plot(..., marker='o') stores xy data.
+                scatter_artist = isinstance(artist, PathCollection)
+                coords = artist.get_offsets() if scatter_artist else artist.get_xydata()
+                transform = (artist.get_offset_transform() if scatter_artist
+                             else artist.get_transform())
+                closest = None
+                distance2 = float('inf')
+                for index in indices:
+                    x_value, y_value = map(float, coords[index])
+                    if not (math.isfinite(x_value) and math.isfinite(y_value)):
+                        continue
+                    pixel_x, pixel_y = transform.transform((x_value, y_value))
+                    dist2 = (pixel_x - event.x)**2 + (pixel_y - event.y)**2
+                    if dist2 < distance2:
+                        closest = (x_value, y_value)
+                        distance2 = dist2
+                if closest is None:
+                    continue
+
+                if not scatter_artist:
+                    # Line2D.contains() also accepts positions along line segments.
+                    # Show the tooltip only close to an actual marker.
+                    radius = max(4.0, artist.get_markersize() / 2 + 2.0) * figure.dpi / 72.0
+                    if distance2 > radius**2:
+                        continue
+                hit = (artist.axes, closest)
+                break
+
+        changed = False
+        for annotation_ax, annotation in annotations.items():
+            if annotation.get_visible() and (hit is None or annotation_ax is not hit[0]):
+                annotation.set_visible(False)
+                changed = True
+
+        if hit is not None:
+            annotation_ax, (x_value, y_value) = hit
+            annotation = annotations.get(annotation_ax)
+            if annotation is None:
+                annotation = annotation_ax.annotate(
+                    '', xy=(0, 0), xytext=(10, 10), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.25', fc='white',
+                              ec='gray', alpha=0.95),
+                    fontsize=9, zorder=10)
+                annotation.set_visible(False)
+                annotations[annotation_ax] = annotation
+            label = f'{x_value:.2f}, {y_value:.2f}'
+            if (not annotation.get_visible() or annotation.xy != (x_value, y_value)
+                    or annotation.get_text() != label):
+                annotation.xy = (x_value, y_value)
+                annotation.set_text(label)
+                annotation.set_visible(True)
+                changed = True
+
+        if changed:
+            figure.canvas.draw_idle()
+
+    figure.canvas.mpl_connect('motion_notify_event', _gp_on_hover)
+    return annotations
+
+_gp_hover_annotations = _gp_install_hover(fig, _gp_hover_artists)
 plt.show()

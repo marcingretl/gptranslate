@@ -162,11 +162,105 @@ std::string numbers(const std::vector<Point>& pts, bool x) {
     }
     return o.str() + ']';
 }
+// Add one figure-level hover callback for point-bearing series. The generated
+// Python deliberately uses only Matplotlib, without requiring mplcursors.
+void emit_point_hover(std::ostringstream& o) {
+    o << R"PY(
+def _gp_install_hover(figure, artists):
+    # Keep each callback's figure and artists local. In gretl4py, successive
+    # eval_file() calls may otherwise overwrite shared Python globals.
+    annotations = {}
+
+    def _gp_on_hover(event):
+        # Inspect only visible point artists in the axes under the mouse.
+        # The reverse order gives the topmost (most recently plotted) series priority.
+        hit = None
+        if event.inaxes is not None:
+            for artist in reversed(artists):
+                if artist.axes is not event.inaxes or not artist.get_visible():
+                    continue
+                contains, details = artist.contains(event)
+                if not contains:
+                    continue
+                indices = details.get('ind', ())
+                if len(indices) == 0:
+                    continue
+
+                # scatter() stores offsets; plot(..., marker='o') stores xy data.
+                scatter_artist = isinstance(artist, PathCollection)
+                coords = artist.get_offsets() if scatter_artist else artist.get_xydata()
+                transform = (artist.get_offset_transform() if scatter_artist
+                             else artist.get_transform())
+                closest = None
+                distance2 = float('inf')
+                for index in indices:
+                    x_value, y_value = map(float, coords[index])
+                    if not (math.isfinite(x_value) and math.isfinite(y_value)):
+                        continue
+                    pixel_x, pixel_y = transform.transform((x_value, y_value))
+                    dist2 = (pixel_x - event.x)**2 + (pixel_y - event.y)**2
+                    if dist2 < distance2:
+                        closest = (x_value, y_value)
+                        distance2 = dist2
+                if closest is None:
+                    continue
+
+                if not scatter_artist:
+                    # Line2D.contains() also accepts positions along line segments.
+                    # Show the tooltip only close to an actual marker.
+                    radius = max(4.0, artist.get_markersize() / 2 + 2.0) * figure.dpi / 72.0
+                    if distance2 > radius**2:
+                        continue
+                hit = (artist.axes, closest)
+                break
+
+        changed = False
+        for annotation_ax, annotation in annotations.items():
+            if annotation.get_visible() and (hit is None or annotation_ax is not hit[0]):
+                annotation.set_visible(False)
+                changed = True
+
+        if hit is not None:
+            annotation_ax, (x_value, y_value) = hit
+            annotation = annotations.get(annotation_ax)
+            if annotation is None:
+                annotation = annotation_ax.annotate(
+                    '', xy=(0, 0), xytext=(10, 10), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.25', fc='white',
+                              ec='gray', alpha=0.95),
+                    fontsize=9, zorder=10)
+                annotation.set_visible(False)
+                annotations[annotation_ax] = annotation
+            label = f'{x_value:.2f}, {y_value:.2f}'
+            if (not annotation.get_visible() or annotation.xy != (x_value, y_value)
+                    or annotation.get_text() != label):
+                annotation.xy = (x_value, y_value)
+                annotation.set_text(label)
+                annotation.set_visible(True)
+                changed = True
+
+        if changed:
+            figure.canvas.draw_idle()
+
+    figure.canvas.mpl_connect('motion_notify_event', _gp_on_hover)
+    return annotations
+
+_gp_hover_annotations = _gp_install_hover(fig, _gp_hover_artists)
+)PY";
+}
 } // namespace
 std::string MatplotlibBackend::generate(const Document& d) const {
     if (d.plots.empty()) {
         throw std::runtime_error("no plots");
     }
+    // Register hover handling only when the plot contains visible point markers.
+    // Lines and synthetic reference curves must not trigger a tooltip.
+    const bool hover_points = std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+        return std::any_of(p.series.begin(), p.series.end(), [](const Series& s) {
+            return !s.constant_y && !s.analytic_y &&
+                   (s.style == Style::Points || s.style == Style::LinesPoints);
+        });
+    });
     std::ostringstream o;
     if (!backend_name_.empty()) {
         // Select the requested backend before importing pyplot.
@@ -185,6 +279,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
     o << "from datetime import datetime, timezone\n";
+    if (hover_points) {
+        // A single registry serves all panels and secondary axes in the figure.
+        o << "import math\nfrom matplotlib.collections import PathCollection\n";
+        o << "_gp_hover_artists = []\n";
+    }
     if (d.positioned_multiplot) {
         // Explicit gnuplot geometry is expressed as fractions of the figure.
         o << "fig = plt.figure(figsize=(" << d.width / 100.0 << "," << d.height / 100.0
@@ -432,12 +531,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     o << "target.plot(x, y, zorder=3, **kw)\n";
                     break;
                 case Style::Points:
+                    // Store the actual Matplotlib artist, so hover labels use the
+                    // final coordinates (including the polar-to-Cartesian transform).
+                    o << "_gp_hover_artist = target.scatter(x, y, s=18, **kw)\n";
+                    o << "_gp_hover_artists.append(_gp_hover_artist)\n";
+                    break;
                 case Style::Dots:
-                    o << "target.scatter(x, y, s=" << (s.style == Style::Dots ? 4 : 18)
-                      << ", **kw)\n";
+                    o << "target.scatter(x, y, s=4, **kw)\n";
                     break;
                 case Style::LinesPoints:
-                    o << "target.plot(x, y, marker='o', zorder=3, **kw)\n";
+                    o << "_gp_hover_artist, = target.plot(x, y, marker='o', zorder=3, **kw)\n";
+                    o << "_gp_hover_artists.append(_gp_hover_artist)\n";
                     break;
                 case Style::Impulses:
                     o << "target.vlines(x, 0, y, **kw)\n";
@@ -672,6 +776,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // tight_layout accounts for legends attached outside the axes.
         o << "fig.tight_layout()\n";
     }
+    if (hover_points)
+        emit_point_hover(o);
     // The generated script is interactive; execution is owned by the caller.
     // Embedded callers can manage display themselves via --no-show.
     if (show_) {

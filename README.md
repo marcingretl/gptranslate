@@ -24,6 +24,7 @@ gnuplot script (.gp) -> C++ parser -> plot intermediate representation (IR)
 ## Features
 
 - Translation of common libgretl plot scripts, including line and point plots, regression fits, diagnostic plots, time-series plots, histograms, boxplots, filled curves, and matrix/image plots.
+- Native, dependency-free Matplotlib hover tooltips for `with points` and `with linespoints`: show Cartesian `(x, y)` coordinates when the cursor is over a marker, including transformed VAR inverse roots and subplot panels. Ordinary lines and the unit circle do not acquire tooltips.
 - Plot properties such as axes, ticks, legends, labels, colors, palettes, log scales, secondary axes, and explicitly positioned multiplot panels.
 - Inline data, named data blocks, selected external data files, and supported gnuplot expressions and conditionals.
 - Compatibility features for gretl/gretl4py, including gnuplot version probing and an optional plot queue for `-persist` calls.
@@ -75,6 +76,8 @@ By default, the generated Python script includes `plt.show()`. For integration w
 ```
 
 The resulting script creates the figure without calling `plt.show()`; the embedding application is responsible for displaying it and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script. The option does not itself fix Windows/TkAgg window-lifetime issues.
+
+Point tooltips work with an interactive Matplotlib backend (such as QtAgg or TkAgg) once the figure is displayed. They are enabled by default for `with points` and `with linespoints`, including when the generated script uses `--no-show`; they do not require `mplcursors`. The annotation disappears when the pointer leaves a marker or switches panels. Headless renderers such as `Agg` do not provide interactive hover to an end user.
 
 To explicitly select a **Matplotlib backend** in the generated Python, use `--backend=NAME`. For example, to select **QtAgg using PySide6** when testing plot-window behavior on Windows:
 

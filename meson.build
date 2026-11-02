@@ -135,3 +135,7 @@ test('svar-irf', py, args: [meson.current_source_dir() / 'tests' / 'check_svar_i
 # VAR inverse roots: polar theta/r data, unit circle, axes, square aspect and tics.
 # Run headlessly without emitting plt.show(), including the tic reset checks.
 test('inverse-roots', py, args: [meson.current_source_dir() / 'tests' / 'check_inverse_roots.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'inverse-roots.gp', meson.current_build_dir() / 'inverse-roots-test.py'])
+
+# Native Matplotlib hover displays data coordinates only for point markers,
+# including polar roots and markers in independent subplot panels.
+test('point-hover', py, args: [meson.current_source_dir() / 'tests' / 'check_hover.py', exe.full_path(), meson.current_source_dir() / 'tests', meson.current_build_dir()])
