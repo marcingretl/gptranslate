@@ -23,7 +23,7 @@ gnuplot script (.gp) -> C++ parser -> plot intermediate representation (IR)
 
 ## Features
 
-- Translation of common libgretl plot scripts, including line and point plots, regression fits, diagnostic plots, time-series plots, histograms, boxplots, filled curves, and matrix/image plots.
+- Translation of common libgretl plot scripts, including line and point plots, regression fits, diagnostic plots, time-series plots, histograms, boxplots, filled curves, error bars (including VAR bootstrap quantile intervals), and matrix/image plots.
 - Native, dependency-free Matplotlib hover tooltips for `with points` and `with linespoints`: show Cartesian `(x, y)` coordinates when the cursor is over a marker, including transformed VAR inverse roots and subplot panels. Ordinary lines and the unit circle do not acquire tooltips.
 - Plot properties such as axes, ticks, legends, labels, colors, palettes, log scales, secondary axes, and explicitly positioned multiplot panels.
 - Inline data, named data blocks, selected external data files, and supported gnuplot expressions and conditionals.

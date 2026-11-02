@@ -376,6 +376,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // Colors are assigned by role and occurrence, not by the source's palette.
         size_t line_index = 0, box_index = 0, other_index = 0;
         const bool contrast_plot = auto_contrast_ && p.series.size() > 1;
+        // Keep error bars the same color as the preceding point-estimate line.
+        std::string last_line_color;
         // Separate positive and negative stacking bases for histogram series.
         o << "_hist_positive = {}\n_hist_negative = {}\n";
         for (const auto& s : p.series) {
@@ -397,6 +399,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // the median and the two dotted notch boundaries.
             if (s.style == Style::Candlesticks) {
                 o << "\nkw['color'] = '#E76F00'";
+            } else if (s.style == Style::ErrorBars && !s.explicit_color &&
+                       !last_line_color.empty()) {
+                // libgretl emits each IRF line immediately before its error bars.
+                o << "\nkw['color'] = " << pystr(last_line_color);
             } else if (contrast_plot && !s.explicit_color && s.style != Style::FilledCurve) {
                 // Each role has its own palette; repeated series cycle through distinct
                 // hues.
@@ -412,8 +418,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 else
                     color = other_colors[(other_index++) % 4];
                 o << "\nkw['color'] = " << pystr(color);
-            } else if (!s.color.empty())
-                o << "\nkw['color'] = " << pystr(mpl_color(s.color));
+                if (s.style == Style::Lines)
+                    last_line_color = color;
+            } else if (!s.color.empty()) {
+                const auto color = mpl_color(s.color);
+                o << "\nkw['color'] = " << pystr(color);
+                if (s.style == Style::Lines)
+                    last_line_color = color;
+            }
             o << "\nkw['linewidth'] = " << s.width << "\n";
             // Translate the gnuplot dash type into a matplotlib line style.
             if (s.dash_type == 2) {
@@ -527,6 +539,36 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     o << "target.fill_between(x, y, upper, alpha=" << p.fill_alpha
                       << ", linewidth=0, zorder=0, **kw)\n";
                     break;
+                case Style::ErrorBars: {
+                    // Matplotlib requires nonnegative errors relative to the central
+                    // value. gretl's bootstrap quantile interval can exclude the
+                    // point estimate, so use the interval midpoint for the whiskers,
+                    // then draw the actual estimate as a separate point marker.
+                    o << "lower = [";
+                    for (size_t j = 0; j < s.lower.size(); ++j) {
+                        if (j)
+                            o << ", ";
+                        o << std::setprecision(17) << s.lower[j];
+                    }
+                    o << "]\nupper = [";
+                    for (size_t j = 0; j < s.upper.size(); ++j) {
+                        if (j)
+                            o << ", ";
+                        o << std::setprecision(17) << s.upper[j];
+                    }
+                    o << "]\n";
+                    o << "_mid = [(lo + hi) / 2 for lo, hi in zip(lower, upper)]\n";
+                    o << "_yerr = [[mid - lo for mid, lo in zip(_mid, lower)], "
+                         "[hi - mid for mid, hi in zip(_mid, upper)]]\n";
+                    o << "target.errorbar(x, _mid, yerr=_yerr, fmt='none', "
+                         "ecolor=kw.get('color', 'C0'), elinewidth=kw['linewidth'], "
+                         "capsize=2, label=kw['label'], zorder=2)\n";
+                    // Use a distinct marker collection to preserve the actual
+                    // estimate, which is not necessarily the midpoint.
+                    o << "target.scatter(x, y, s=12, color=kw.get('color', 'C0'), "
+                         "zorder=3)\n";
+                    break;
+                }
                 case Style::Lines:
                     o << "target.plot(x, y, zorder=3, **kw)\n";
                     break;

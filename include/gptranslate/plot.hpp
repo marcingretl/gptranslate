@@ -35,6 +35,7 @@ enum class Style {
     Histograms,
     Dots,
     FilledCurve,
+    ErrorBars,
     Candlesticks
 };
 struct Series {
@@ -57,7 +58,9 @@ struct Series {
     // Validated gnuplot analytic expression translated into Python syntax.
     std::optional<std::string> analytic_y;
     std::vector<Point> points;
-    // Upper boundary values for filled curves, aligned with points.
+    // Error bars store both bounds independently of their point estimates.
+    std::vector<double> lower;
+    // Upper boundary values for filled curves and error bars, aligned with points.
     std::vector<double> upper;
     // Candlestick columns: x, box bottom, whisker bottom, whisker top, box top.
     std::vector<double> candle_low, candle_high, candle_top;

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `with errorbars` / `with yerrorbars` translation for libgretl VAR impulse-response charts, including three-column symmetric and four-column asymmetric errors, exact bootstrap quantile bounds even when the estimate falls outside the interval, and matched line/whisker colors. Added headless regression tests.
 - Added native Matplotlib hover tooltips for point and linespoint markers without third-party packages. Tooltips show Cartesian coordinates (including polar inverse roots), ignore bare lines, work with multiple axes and figures, and remain active when `--no-show` delegates display to the embedding application. Added headless motion-event regression tests.
 - Added general support for `unset border`, `set yzeroaxis`, `unset ytics`/`set noytics`, `set size square` and `set polar` in the plot IR and Matplotlib backend. Polar inline data (theta in radians, radius) render in Cartesian coordinates, while a constant polar function draws a circle; polar analytic functions remain unsupported.
 - Added headless VAR inverse-roots regression coverage for geometry, axes and tic resetting; the panplot-stack runtime test now uses `--no-show`.

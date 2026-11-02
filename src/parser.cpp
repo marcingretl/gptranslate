@@ -1348,6 +1348,10 @@ ParseResult parse(const std::string& source) {
                         ser.style = Style::Dots;
                     } else if (style == "filledcurve" || style == "filledcurves") {
                         ser.style = Style::FilledCurve;
+                    } else if (style == "errorbars" || style == "yerrorbars" ||
+                               style == "errorbar" || style == "yerrorbar") {
+                        // The unqualified gnuplot errorbars style represents y errors.
+                        ser.style = Style::ErrorBars;
                     } else {
                         throw std::runtime_error("unsupported plot style: " + style);
                     }
@@ -1413,14 +1417,29 @@ ParseResult parse(const std::string& source) {
                     }
                     const bool candle = ser.style == Style::Candlesticks;
                     const bool filled = ser.style == Style::FilledCurve;
+                    const bool errorbars = ser.style == Style::ErrorBars;
+                    const bool has_using = spec.find(" using ") != spec.npos;
+                    // Error bars accept x:y:dy or x:y:ylow:yhigh, including
+                    // explicit column expressions. Without `using`, the data
+                    // row length determines whether a symmetric or asymmetric
+                    // interval was supplied.
+                    std::vector<std::string> error_fields;
+                    if (errorbars && has_using) {
+                        try {
+                            error_fields = using_fields(spec, 4);
+                        } catch (const std::runtime_error&) {
+                            error_fields = using_fields(spec, 3);
+                        }
+                    }
                     // Arithmetic using expressions need per-row evaluation.
                     const bool using_expr =
-                        !filled && spec.find(" using ") != spec.npos && spec.find('$') != spec.npos;
+                        !filled && !errorbars && has_using && spec.find('$') != spec.npos;
                     const auto fields = candle     ? using_fields(spec, 5)
                                       : filled     ? using_fields(spec)
                                       : using_expr ? using_fields(spec, 2)
                                                    : std::vector<std::string>{};
-                    auto xcol = (filled || using_expr || candle) ? 1 : using_col(spec, 1, true);
+                    auto xcol = (filled || using_expr || candle || errorbars)
+                                    ? 1 : using_col(spec, 1, true);
                     // Histograms use the row number as x; `using 2` selects only the
                     // height.
                     if (ser.style == Style::Histograms)
@@ -1483,6 +1502,33 @@ ParseResult parse(const std::string& source) {
                             if (fx && lower && upper) {
                                 ser.points.push_back({*fx, *lower});
                                 ser.upper.push_back(*upper);
+                            }
+                        } else if (errorbars) {
+                            // Retain the point estimate and the two error-bar bounds
+                            // separately. Bootstrap quantile intervals need not contain
+                            // the point estimate, so no symmetry is assumed.
+                            std::vector<std::optional<double>> values;
+                            if (error_fields.empty()) {
+                                // Without `using`, read x:y:dy or x:y:ylow:yhigh.
+                                for (size_t col = 0; col < std::min<size_t>(cells.size(), 4); ++col)
+                                    values.push_back(number(cells[col]));
+                            } else {
+                                for (const auto& field : error_fields)
+                                    values.push_back(evaluate_using_field(field, cells));
+                            }
+                            if (values.size() != 3 && values.size() != 4)
+                                throw std::runtime_error("errorbars require 3 or 4 columns");
+                            if (std::all_of(values.begin(), values.end(), [](const auto& v) {
+                                    return v.has_value();
+                                })) {
+                                const double center = *values[1];
+                                const double lo = values.size() == 3
+                                    ? center - std::abs(*values[2]) : *values[2];
+                                const double hi = values.size() == 3
+                                    ? center + std::abs(*values[2]) : *values[3];
+                                ser.points.push_back({*values[0], center});
+                                ser.lower.push_back(lo);
+                                ser.upper.push_back(hi);
                             }
                         } else if (using_expr) {
                             // Evaluate both using fields against the current data row.

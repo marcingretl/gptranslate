@@ -139,3 +139,7 @@ test('inverse-roots', py, args: [meson.current_source_dir() / 'tests' / 'check_i
 # Native Matplotlib hover displays data coordinates only for point markers,
 # including polar roots and markers in independent subplot panels.
 test('point-hover', py, args: [meson.current_source_dir() / 'tests' / 'check_hover.py', exe.full_path(), meson.current_source_dir() / 'tests', meson.current_build_dir()])
+
+# libgretl VAR bootstrap IRFs: 4-column quantile whiskers, symmetric errors,
+# implicit columns and arithmetic `using`, rendered headlessly by Matplotlib.
+test('var-irf-errorbars', py, args: [meson.current_source_dir() / 'tests' / 'check_var_irf_errorbars.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'var-irf-errorbars.gp', meson.current_build_dir() / 'var-irf-errorbars.py'])
