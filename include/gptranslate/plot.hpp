@@ -118,6 +118,11 @@ struct Plot {
         bool graph_coordinates{false};
         // Gnuplot defaults to left alignment unless `center` is requested.
         bool centered{false};
+        // Labels may include a point marker at a data coordinate and a
+        // gnuplot character-cell offset from that marker.
+        bool point_marker{false};
+        double offset_x{0}, offset_y{0};
+        int point_line_type{-1};
     };
     std::vector<Label> labels;
     bool xtics_disabled{false}, ytics_disabled{false};

@@ -731,6 +731,25 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         }
         // Gnuplot labels may use either data or axes-relative graph coordinates.
         for (const auto& label : p.labels) {
+            if (label.point_marker) {
+                // Confidence ellipses mark their estimated coefficient pair.
+                std::string color = "C1";
+                if (label.point_line_type > 0 &&
+                    static_cast<size_t>(label.point_line_type) <= d.linetype_colors.size() &&
+                    !d.linetype_colors[label.point_line_type - 1].empty()) {
+                    color = mpl_color(d.linetype_colors[label.point_line_type - 1]);
+                }
+                o << "ax.plot([" << std::setprecision(17) << label.x << "], [" << label.y
+                  << "], marker='+', linestyle='None', markersize=8, color="
+                  << pystr(color) << ", zorder=5)\n";
+                // Gnuplot's offset units are character cells, approximately
+                // six points wide/tall at the default font size.
+                o << "ax.annotate(" << pystr(label.text) << ", (" << label.x << ", "
+                  << label.y << "), xytext=(" << label.offset_x * 6.0 << ", "
+                  << label.offset_y * 6.0
+                  << "), textcoords='offset points', ha='left', va='bottom')\n";
+                continue;
+            }
             o << "ax.text(" << std::setprecision(17) << label.x << ", " << label.y << ", "
               << pystr(label.text) << ", ha='" << (label.centered ? "center" : "left")
               << "', va='center'";

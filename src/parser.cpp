@@ -18,6 +18,7 @@
 
 #include "gptranslate/parser.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -188,6 +189,84 @@ std::optional<double> tic_position(const std::string& text) {
     if (denominator == 0)
         return {};
     return numerator * std::acos(-1.0) / denominator;
+}
+// Read libgretl's affine trigonometric x(t)/y(t) definitions. These
+// equations describe the ellipse and its marginal confidence boundaries.
+// Arbitrary gnuplot functions are not executed or silently approximated.
+std::array<double, 3> ellipse_function(const std::string& text, char axis) {
+    static const std::string numeric = R"(([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?))";
+    const std::regex definition("^" + std::string(1, axis) +
+        R"(\(t\)\s*=\s*)" + numeric + R"(\*cos\(t\)\s*)" +
+        numeric + R"(\*sin\(t\)\s*)" + numeric + R"(\s*$)");
+    std::smatch match;
+    if (!std::regex_match(text, match, definition))
+        throw std::runtime_error("unsupported parametric definition: " + text);
+    std::array<double, 3> out{};
+    for (int i = 0; i < 3; ++i) {
+        const auto value = number(match[i + 1].str());
+        if (!value)
+            throw std::runtime_error("invalid coefficient in parametric definition");
+        out[i] = *value;
+    }
+    return out;
+}
+// Sample a restricted pair of parametric functions into the ordinary Plot IR.
+// Parametric support is scoped to the syntax emitted by libgretl's confidence
+// ellipse plot; unsupported expressions remain explicit translation errors.
+std::vector<Series> ellipse_series(const std::string& command,
+                                   const std::array<double, 3>& xdef,
+                                   const std::array<double, 3>& ydef,
+                                   const std::pair<double, double>& trange,
+                                   const std::vector<std::string>& colors) {
+    const auto specs = split_specs(command);
+    if (specs.size() % 2 != 0 || specs.empty())
+        throw std::runtime_error("parametric plot requires x(t), y(t) pairs");
+    std::vector<Series> series;
+    for (size_t i = 0; i < specs.size(); i += 2) {
+        const auto& xspec = specs[i];
+        const auto& yspec = specs[i + 1];
+        std::istringstream xs(xspec), ys(yspec);
+        std::string xsource, ysource;
+        xs >> xsource;
+        ys >> ysource;
+        const auto xconst = number(xsource);
+        const auto yconst = number(ysource);
+        if (xsource != "x(t)" && !xconst)
+            throw std::runtime_error("unsupported parametric x source: " + xspec);
+        if (ysource != "y(t)" && !yconst)
+            throw std::runtime_error("unsupported parametric y source: " + yspec);
+        // libgretl uses 'notitle' and optional 'w lines lt N'. Avoid
+        // silently accepting other plot types as line graphs.
+        static const std::regex parameters(R"(^\S+\s+notitle(?:\s+(?:w|with)\s+lines\s+lt\s+([1-9][0-9]*))?\s*$)");
+        std::smatch match;
+        if (trim(xspec) != "x(t)" && !xconst)
+            throw std::runtime_error("invalid parametric x expression");
+        if (!std::regex_match(yspec, match, parameters))
+            throw std::runtime_error("unsupported parametric series style: " + yspec);
+        Series ser;
+        ser.title = "";
+        ser.style = Style::Lines;
+        if (match[1].matched) {
+            ser.line_type = std::stoi(match[1].str());
+            ser.explicit_color = true;
+            if (ser.line_type > 0 && static_cast<size_t>(ser.line_type) <= colors.size())
+                ser.color = colors[ser.line_type - 1];
+            if (ser.color.empty())
+                ser.color = "C" + std::to_string((ser.line_type - 1) % 10);
+        }
+        // Preserve the default gnuplot parametric range [-5:5] unless
+        // the source supplies an explicit trange.
+        for (int k = 0; k <= 400; ++k) {
+            const double t = trange.first + (trange.second - trange.first) * k / 400;
+            const double x = xconst ? *xconst :
+                (xdef[0] * std::cos(t) + xdef[1] * std::sin(t) + xdef[2]);
+            const double y = yconst ? *yconst :
+                (ydef[0] * std::cos(t) + ydef[1] * std::sin(t) + ydef[2]);
+            ser.points.push_back({x, y});
+        }
+        series.push_back(std::move(ser));
+    }
+    return series;
 }
 // Read a rectangular matrix, retaining row order and rejecting malformed cells.
 ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
@@ -668,6 +747,9 @@ ParseResult parse(const std::string& source) {
     d.plots.emplace_back();
     Plot* p = &d.plots.back();
     Style default_style = Style::Lines;
+    bool parametric = false;
+    std::optional<std::array<double, 3>> x_function, y_function;
+    std::pair<double, double> trange{-5.0, 5.0};
     std::string previous_file;
     std::map<std::string, std::vector<std::string>> external_data;
     std::istringstream input(source);
@@ -778,6 +860,28 @@ ParseResult parse(const std::string& source) {
                 p->yzeroaxis = false;
                 continue;
             }
+            // Parameterized x(t)/y(t) curves are used for confidence ellipses.
+            if (s == "set parametric") {
+                parametric = true;
+                continue;
+            }
+            if (s == "unset parametric") {
+                parametric = false;
+                continue;
+            }
+            if (starts(s, "set trange ")) {
+                Axis range;
+                set_range(range, s);
+                if (!range.min || !range.max || *range.max <= *range.min)
+                    throw std::runtime_error("invalid parametric trange");
+                trange = {*range.min, *range.max};
+                continue;
+            }
+            if (starts(s, "x(t) =") || starts(s, "y(t) =")) {
+                auto& definition = starts(s, "x(t) =") ? x_function : y_function;
+                definition = ellipse_function(s, s[0]);
+                continue;
+            }
             // A polar plot's inline columns contain theta (radians) and r.
             if (s == "set polar") {
                 p->polar = true;
@@ -812,6 +916,8 @@ ParseResult parse(const std::string& source) {
                 // the separator between x and y (as used by boxplots).
                 static const std::regex graph_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+([^,\s]+)\s*,\s*graph\s+([^\s]+)(?:\s+(center|front|back))?\s*$)GP");
+                static const std::regex point_label_re(
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+)\s+center\s*$)GP");
                 std::smatch match;
@@ -823,6 +929,17 @@ ParseResult parse(const std::string& source) {
                     // annotations above the data by default.
                     p->labels.push_back({match[2].str(), *x, *y, true,
                                          match[5].str() == "center"});
+                } else if (std::regex_match(s, match, point_label_re)) {
+                    const auto x = number(match[3].str()), y = number(match[4].str());
+                    const auto dx = number(match[7].str()), dy = number(match[8].str());
+                    if (!x || !y || !dx || !dy)
+                        throw std::runtime_error("invalid point label coordinates: " + s);
+                    Plot::Label label{match[2].str(), *x, *y, false, false};
+                    label.point_marker = true;
+                    label.offset_x = *dx;
+                    label.offset_y = *dy;
+                    label.point_line_type = std::stoi(match[5].str());
+                    p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, data_label_re)) {
                     // Keep the original data-label coordinate parsing intact.
                     static const std::regex coords_re(R"GP(^([^,\s]+)\s*,\s*([^\s]+)$)GP");
@@ -1267,6 +1384,15 @@ ParseResult parse(const std::string& source) {
                 while (!command.empty() && command.back() == '\\' && i + 1 < lines.size()) {
                     command.pop_back();
                     command += " " + trim(lines[++i]);
+                }
+                if (parametric) {
+                    if (!x_function || !y_function)
+                        throw std::runtime_error("parametric plot lacks x(t) or y(t) definition");
+                    auto lines = ellipse_series(command, *x_function, *y_function,
+                                                trange, d.linetype_colors);
+                    p->series.insert(p->series.end(), lines.begin(), lines.end());
+                    p->legend = false;
+                    continue;
                 }
                 auto specs = split_specs(command, decimal_comma);
                 for (const auto& spec : specs) {

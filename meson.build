@@ -155,3 +155,7 @@ test('graphing-label-front', py, args: [check, exe.full_path(), meson.current_so
 
 # Quarter and month time-series plots specify primary x minor-tic counts.
 test('primary-minortics', py, args: [check, exe.full_path(), meson.current_source_dir() / 'tests' / 'primary-minortics.gp', meson.current_build_dir() / 'primary-minortics.py'])
+
+# libgretl confidence ellipses use affine parametric equations, marginal
+# interval bounds and a point annotation at the fitted coefficient pair.
+test('confidence-ellipse', py, args: [meson.current_source_dir() / 'tests' / 'check_confidence_ellipse.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'confidence-ellipse.gp', meson.current_build_dir() / 'confidence-ellipse.py'])
