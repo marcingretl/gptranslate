@@ -102,7 +102,8 @@ void emit_tics(std::ostringstream& o,
             if (i) {
                 o << ",";
             }
-            o << tics.explicit_tics[i].position;
+            // Preserve the precision of symbolic pi tick positions.
+            o << std::setprecision(17) << tics.explicit_tics[i].position;
         }
         o << "], labels=[";
         for (size_t i = 0; i < tics.explicit_tics.size(); ++i) {
@@ -741,16 +742,42 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // independent.
         emit_tics(o, p.x.tics, "x", "ax", p.xdata_time && p.timefmt == "%s");
         emit_tics(o, p.y.tics, "y", "ax");
+        if (p.mxtics > 1) {
+            o << "ax.xaxis.set_minor_locator(AutoMinorLocator(" << p.mxtics << "))\n";
+        }
         // Unsetting tics wins over any earlier explicit interval or formatter.
         if (p.xtics_disabled)
             o << "ax.set_xticks([])\n";
         if (p.ytics_disabled)
             o << "ax.set_yticks([])\n";
-        if (p.x2.tics.enabled) {
-            o << "top_ax = ax.secondary_xaxis('top')\n";
-            emit_tics(o, p.x2.tics, "x", "top_ax");
-            if (p.mx2tics > 1) {
-                o << "top_ax.xaxis.set_minor_locator(AutoMinorLocator(" << p.mx2tics << "))\n";
+        if (p.x2.tics.enabled || !p.x2.label.empty() || p.x2.min || p.x2.max) {
+            // A specified x2range uses an independent coordinate system. In the
+            // residual periodogram, for example, x2 spans four times the x range.
+            // A plain secondary_xaxis would incorrectly interpret its tic values
+            // in primary-axis coordinates, so use a shared-position twiny axis.
+            if (p.x2.min || p.x2.max) {
+                o << "top_ax = ax.twiny()\n";
+                if (p.x2.min) {
+                    o << "top_ax.set_xlim(left=" << *p.x2.min << ")\n";
+                }
+                if (p.x2.max) {
+                    o << "top_ax.set_xlim(right=" << *p.x2.max << ")\n";
+                }
+            } else {
+                // Keep the existing identity mapping when no independent range
+                // is given (e.g. linked axes used by libgretl matrix plots).
+                o << "top_ax = ax.secondary_xaxis('top')\n";
+            }
+            o << "top_ax.set_xlabel(" << pystr(p.x2.label) << ")\n";
+            if (p.x2.tics.enabled) {
+                emit_tics(o, p.x2.tics, "x", "top_ax");
+                if (p.mx2tics > 1) {
+                    o << "top_ax.xaxis.set_minor_locator(AutoMinorLocator(" << p.mx2tics << "))\n";
+                }
+            } else {
+                // Gnuplot does not enable secondary tics merely by giving a
+                // label or setting a numeric range.
+                o << "top_ax.set_xticks([])\n";
             }
         }
         if (p.y2.tics.enabled && !twin) {

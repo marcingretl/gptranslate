@@ -173,6 +173,22 @@ void set_range(Axis& a, const std::string& s) {
     a.min = number(s.substr(l + 1, c - l - 1));
     a.max = number(s.substr(c + 1, r - c - 1));
 }
+// Numeric tic positions in libgretl spectra may contain pi, pi/4 or
+// 3*pi/4. Recognize only these constant forms, without evaluating arbitrary
+// gnuplot expressions or executing external code.
+std::optional<double> tic_position(const std::string& text) {
+    if (const auto numeric = number(text))
+        return numeric;
+    static const std::regex pi_tic(R"(^\s*(?:([0-9]+)\s*\*\s*)?pi(?:\s*/\s*([0-9]+))?\s*$)");
+    std::smatch match;
+    if (!std::regex_match(text, match, pi_tic))
+        return {};
+    const double numerator = match[1].matched ? std::stod(match[1].str()) : 1.0;
+    const double denominator = match[2].matched ? std::stod(match[2].str()) : 1.0;
+    if (denominator == 0)
+        return {};
+    return numerator * std::acos(-1.0) / denominator;
+}
 // Read a rectangular matrix, retaining row order and rejecting malformed cells.
 ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
     ImageMatrix matrix;
@@ -274,7 +290,7 @@ void parse_tics(Tics& tics, const std::string& spec) {
             static const std::regex tic_re(R"(^\s*(['"])(.*?)\1\s+([^\s]+)\s*$)");
             if (!std::regex_match(item, match, tic_re))
                 throw std::runtime_error("invalid tic specification: " + item);
-            const auto pos = number(match[3].str());
+            const auto pos = tic_position(match[3].str());
             if (!pos) {
                 throw std::runtime_error("invalid tic position: " + item);
             }
@@ -795,7 +811,7 @@ ParseResult parse(const std::string& source) {
                 // Decimal commas in data coordinates must not be mistaken for
                 // the separator between x and y (as used by boxplots).
                 static const std::regex graph_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+([^,\s]+)\s*,\s*graph\s+([^\s]+)(?:\s+(center))?\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+([^,\s]+)\s*,\s*graph\s+([^\s]+)(?:\s+(center|front|back))?\s*$)GP");
                 static const std::regex data_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+)\s+center\s*$)GP");
                 std::smatch match;
@@ -803,7 +819,10 @@ ParseResult parse(const std::string& source) {
                     const auto x = number(match[3].str()), y = number(match[4].str());
                     if (!x || !y)
                         throw std::runtime_error("invalid label coordinates: " + s);
-                    p->labels.push_back({match[2].str(), *x, *y, true, match[5].matched});
+                    // Layer keywords are accepted; Matplotlib draws graph
+                    // annotations above the data by default.
+                    p->labels.push_back({match[2].str(), *x, *y, true,
+                                         match[5].str() == "center"});
                 } else if (std::regex_match(s, match, data_label_re)) {
                     // Keep the original data-label coordinate parsing intact.
                     static const std::regex coords_re(R"GP(^([^,\s]+)\s*,\s*([^\s]+)$)GP");
@@ -983,6 +1002,11 @@ ParseResult parse(const std::string& source) {
                 p->y2.label.clear();
                 continue;
             }
+            // The periodogram uses a secondary frequency axis labelled in periods.
+            if (s == "set nox2label" || s == "unset x2label") {
+                p->x2.label.clear();
+                continue;
+            }
             if (text_command(s, "set xlabel")) {
                 p->x.label = quoted(s.substr(10));
                 continue;
@@ -993,6 +1017,10 @@ ParseResult parse(const std::string& source) {
             }
             if (text_command(s, "set y2label")) {
                 p->y2.label = quoted(s.substr(11));
+                continue;
+            }
+            if (text_command(s, "set x2label")) {
+                p->x2.label = quoted(s.substr(11));
                 continue;
             }
             // The color axis is independent of x/y axes and applies to matrix images.
@@ -1031,6 +1059,15 @@ ParseResult parse(const std::string& source) {
             }
             if (starts(s, "set y2tics ")) {
                 parse_tics(p->y2.tics, trim(s.substr(11)));
+                continue;
+            }
+            if (starts(s, "set mxtics ")) {
+                // Gretl emits these for quarterly/monthly time-series plots.
+                auto n = number(s.substr(11));
+                if (!n || *n < 0 || *n > 1000 || std::floor(*n) != *n) {
+                    throw std::runtime_error("invalid mxtics");
+                }
+                p->mxtics = static_cast<int>(*n);
                 continue;
             }
             if (starts(s, "set mx2tics ")) {
@@ -1120,6 +1157,11 @@ ParseResult parse(const std::string& source) {
             }
             if (std::regex_search(s, std::regex(R"(^set y2range\s*\[)"))) {
                 set_range(p->y2, s);
+                continue;
+            }
+            // x2range defines an independent numeric scale for the top axis.
+            if (std::regex_search(s, std::regex(R"(^set x2range\s*\[)"))) {
+                set_range(p->x2, s);
                 continue;
             }
             if (starts(s, "set grid")) {

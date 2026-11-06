@@ -133,7 +133,8 @@ struct Plot {
     // Preserve gnuplot time-axis settings for backend conversion.
     bool xdata_time{false};
     std::string timefmt;
-    int mx2tics{0}, my2tics{0};
+    // Primary and secondary minor-tic subdivisions in gnuplot units.
+    int mxtics{0}, mx2tics{0}, my2tics{0};
     bool autoscale_fix{false}, link_x{false}, link_y{false};
     bool grid_x{false}, grid_y{false}, legend{true};
     std::string legend_location;

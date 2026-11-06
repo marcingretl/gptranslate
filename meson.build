@@ -143,3 +143,15 @@ test('point-hover', py, args: [meson.current_source_dir() / 'tests' / 'check_hov
 # libgretl VAR bootstrap IRFs: 4-column quantile whiskers, symmetric errors,
 # implicit columns and arithmetic `using`, rendered headlessly by Matplotlib.
 test('var-irf-errorbars', py, args: [meson.current_source_dir() / 'tests' / 'check_var_irf_errorbars.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'var-irf-errorbars.gp', meson.current_build_dir() / 'var-irf-errorbars.py'])
+
+# Residual periodograms use an independently scaled top axis for periods;
+# the radians variant also uses symbolic pi positions on the bottom axis.
+foreach kind : ['scaled', 'radians']
+  test('periodogram-' + kind, py, args: [meson.current_source_dir() / 'tests' / 'check_periodogram.py', exe.full_path(), meson.current_source_dir() / 'tests' / ('periodogram-' + kind + '.gp'), meson.current_build_dir() / ('periodogram-' + kind + '.py')])
+endforeach
+
+# libgretl's graph-relative frequency annotations may use the front layer.
+test('graphing-label-front', py, args: [check, exe.full_path(), meson.current_source_dir() / 'tests' / 'graphing-label-front.gp', meson.current_build_dir() / 'graphing-label-front.py'])
+
+# Quarter and month time-series plots specify primary x minor-tic counts.
+test('primary-minortics', py, args: [check, exe.full_path(), meson.current_source_dir() / 'tests' / 'primary-minortics.gp', meson.current_build_dir() / 'primary-minortics.py'])
