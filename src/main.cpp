@@ -118,7 +118,8 @@ int main(int argc, char** argv) {
             } else if (arg == "--backend") {
                 // Pass a Matplotlib backend name through to the generated Python.
                 if (++i >= argc || argv[i][0] == '-') {
-                    throw std::runtime_error("--backend requires a backend name (or an empty string)");
+                    throw std::runtime_error(
+                        "--backend requires a backend name (or an empty string)");
                 }
                 backend_name = argv[i];
                 continue;

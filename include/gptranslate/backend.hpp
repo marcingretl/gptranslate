@@ -29,7 +29,8 @@ class Backend {
 class MatplotlibBackend final : public Backend {
   public:
     // Readability mode is enabled by default for combined plots.
-    explicit MatplotlibBackend(bool auto_contrast = true, bool show = true,
+    explicit MatplotlibBackend(bool auto_contrast = true,
+                               bool show = true,
                                std::string backend_name = "")
         : auto_contrast_(auto_contrast), show_(show), backend_name_(std::move(backend_name)) {
     }

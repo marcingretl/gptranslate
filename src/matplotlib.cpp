@@ -481,8 +481,7 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                       << " * math.cos(theta) for theta in _gp_angles], [" << *s.constant_y
                       << " * math.sin(theta) for theta in _gp_angles], zorder=3, **kw)\n";
                 } else {
-                    o << "target.axhline(" << std::setprecision(17) << *s.constant_y
-                      << ", **kw)\n";
+                    o << "target.axhline(" << std::setprecision(17) << *s.constant_y << ", **kw)\n";
                 }
                 continue;
             }
@@ -740,13 +739,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     color = mpl_color(d.linetype_colors[label.point_line_type - 1]);
                 }
                 o << "ax.plot([" << std::setprecision(17) << label.x << "], [" << label.y
-                  << "], marker='+', linestyle='None', markersize=8, color="
-                  << pystr(color) << ", zorder=5)\n";
+                  << "], marker='+', linestyle='None', markersize=8, color=" << pystr(color)
+                  << ", zorder=5)\n";
                 // Gnuplot's offset units are character cells, approximately
                 // six points wide/tall at the default font size.
-                o << "ax.annotate(" << pystr(label.text) << ", (" << label.x << ", "
-                  << label.y << "), xytext=(" << label.offset_x * 6.0 << ", "
-                  << label.offset_y * 6.0
+                o << "ax.annotate(" << pystr(label.text) << ", (" << label.x << ", " << label.y
+                  << "), xytext=(" << label.offset_x * 6.0 << ", " << label.offset_y * 6.0
                   << "), textcoords='offset points', ha='left', va='bottom')\n";
                 continue;
             }

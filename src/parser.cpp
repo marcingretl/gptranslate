@@ -194,10 +194,11 @@ std::optional<double> tic_position(const std::string& text) {
 // equations describe the ellipse and its marginal confidence boundaries.
 // Arbitrary gnuplot functions are not executed or silently approximated.
 std::array<double, 3> ellipse_function(const std::string& text, char axis) {
-    static const std::string numeric = R"(([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?))";
-    const std::regex definition("^" + std::string(1, axis) +
-        R"(\(t\)\s*=\s*)" + numeric + R"(\*cos\(t\)\s*)" +
-        numeric + R"(\*sin\(t\)\s*)" + numeric + R"(\s*$)");
+    static const std::string numeric =
+        R"(([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?))";
+    const std::regex definition("^" + std::string(1, axis) + R"(\(t\)\s*=\s*)" + numeric +
+                                R"(\*cos\(t\)\s*)" + numeric + R"(\*sin\(t\)\s*)" + numeric +
+                                R"(\s*$)");
     std::smatch match;
     if (!std::regex_match(text, match, definition))
         throw std::runtime_error("unsupported parametric definition: " + text);
@@ -237,7 +238,8 @@ std::vector<Series> ellipse_series(const std::string& command,
             throw std::runtime_error("unsupported parametric y source: " + yspec);
         // libgretl uses 'notitle' and optional 'w lines lt N'. Avoid
         // silently accepting other plot types as line graphs.
-        static const std::regex parameters(R"(^\S+\s+notitle(?:\s+(?:w|with)\s+lines\s+lt\s+([1-9][0-9]*))?\s*$)");
+        static const std::regex parameters(
+            R"(^\S+\s+notitle(?:\s+(?:w|with)\s+lines\s+lt\s+([1-9][0-9]*))?\s*$)");
         std::smatch match;
         if (trim(xspec) != "x(t)" && !xconst)
             throw std::runtime_error("invalid parametric x expression");
@@ -258,10 +260,10 @@ std::vector<Series> ellipse_series(const std::string& command,
         // the source supplies an explicit trange.
         for (int k = 0; k <= 400; ++k) {
             const double t = trange.first + (trange.second - trange.first) * k / 400;
-            const double x = xconst ? *xconst :
-                (xdef[0] * std::cos(t) + xdef[1] * std::sin(t) + xdef[2]);
-            const double y = yconst ? *yconst :
-                (ydef[0] * std::cos(t) + ydef[1] * std::sin(t) + ydef[2]);
+            const double x =
+                xconst ? *xconst : (xdef[0] * std::cos(t) + xdef[1] * std::sin(t) + xdef[2]);
+            const double y =
+                yconst ? *yconst : (ydef[0] * std::cos(t) + ydef[1] * std::sin(t) + ydef[2]);
             ser.points.push_back({x, y});
         }
         series.push_back(std::move(ser));
@@ -927,8 +929,7 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("invalid label coordinates: " + s);
                     // Layer keywords are accepted; Matplotlib draws graph
                     // annotations above the data by default.
-                    p->labels.push_back({match[2].str(), *x, *y, true,
-                                         match[5].str() == "center"});
+                    p->labels.push_back({match[2].str(), *x, *y, true, match[5].str() == "center"});
                 } else if (std::regex_match(s, match, point_label_re)) {
                     const auto x = number(match[3].str()), y = number(match[4].str());
                     const auto dx = number(match[7].str()), dy = number(match[8].str());
@@ -1388,8 +1389,8 @@ ParseResult parse(const std::string& source) {
                 if (parametric) {
                     if (!x_function || !y_function)
                         throw std::runtime_error("parametric plot lacks x(t) or y(t) definition");
-                    auto lines = ellipse_series(command, *x_function, *y_function,
-                                                trange, d.linetype_colors);
+                    auto lines = ellipse_series(
+                        command, *x_function, *y_function, trange, d.linetype_colors);
                     p->series.insert(p->series.end(), lines.begin(), lines.end());
                     p->legend = false;
                     continue;
@@ -1607,7 +1608,8 @@ ParseResult parse(const std::string& source) {
                                       : using_expr ? using_fields(spec, 2)
                                                    : std::vector<std::string>{};
                     auto xcol = (filled || using_expr || candle || errorbars)
-                                    ? 1 : using_col(spec, 1, true);
+                                  ? 1
+                                  : using_col(spec, 1, true);
                     // Histograms use the row number as x; `using 2` selects only the
                     // height.
                     if (ser.style == Style::Histograms)
@@ -1690,10 +1692,10 @@ ParseResult parse(const std::string& source) {
                                     return v.has_value();
                                 })) {
                                 const double center = *values[1];
-                                const double lo = values.size() == 3
-                                    ? center - std::abs(*values[2]) : *values[2];
-                                const double hi = values.size() == 3
-                                    ? center + std::abs(*values[2]) : *values[3];
+                                const double lo =
+                                    values.size() == 3 ? center - std::abs(*values[2]) : *values[2];
+                                const double hi =
+                                    values.size() == 3 ? center + std::abs(*values[2]) : *values[3];
                                 ser.points.push_back({*values[0], center});
                                 ser.lower.push_back(lo);
                                 ser.upper.push_back(hi);
