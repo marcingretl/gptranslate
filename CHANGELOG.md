@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added libgretl contingency-table heatmap compatibility: `set size ratio -1` (equal x/y data-unit scaling), `set palette model RGB`, normalized numeric RGB triples in `set palette defined`, colorbar titles via `set cblabel`, `unset label`, and `set label "..." at x,y center front`. Semicolon-separated commands on one source line are now expanded outside named data blocks while preserving source line diagnostics. Added a real 3x3 confusion-matrix fixture and a headless Matplotlib runtime regression checking exact matrix values, color-scale range, color stops, colorbar title and all nine cell labels.
+
 - **Changed default display policy:** generated Python scripts no longer append `plt.show()` unless explicitly requested with the new `--add-show` option. This also makes `-persist` plot-queue entries display-neutral by default, allowing gretl4py to evaluate the whole batch before invoking non-blocking display according to its `auto_show` policy. `--no-show` remains accepted as a backward-compatible no-op for the default. Updated CLI help, README and regression tests for direct translation, selected backends and queued plots. This change supersedes the earlier `--no-show` opt-out behavior described below.
 
 - Added `with errorbars` / `with yerrorbars` translation for libgretl VAR impulse-response charts, including three-column symmetric and four-column asymmetric errors, exact bootstrap quantile bounds even when the estimate falls outside the interval, and matched line/whisker colors. Added headless regression tests.

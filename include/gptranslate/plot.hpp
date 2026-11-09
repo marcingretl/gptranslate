@@ -17,6 +17,7 @@
  */
 
 #pragma once
+#include <array>
 #include <map>
 #include <optional>
 #include <string>
@@ -105,10 +106,13 @@ struct MatrixLabels {
 struct PaletteStop {
     double value{};
     std::string color;
+    // An RGB stop retains full normalized precision instead of rounding to hex.
+    std::optional<std::array<double, 3>> rgb;
 };
 struct ColorScale {
     std::optional<double> min, max;
     std::vector<PaletteStop> stops;
+    std::string label; // title of the colorbox (set cblabel)
 };
 struct Plot {
     struct Label {
@@ -130,6 +134,8 @@ struct Plot {
     bool polar{false};
     // `set size square` fixes the axes geometry, unlike a multiplot panel size.
     bool square{false};
+    // `set size ratio -1` makes x and y data units equally long.
+    bool equal_units{false};
     // Gnuplot multiplot placement, normalized to the figure dimensions.
     double origin_x{0.0}, origin_y{0.0};
     double size_x{1.0}, size_y{1.0};

@@ -337,8 +337,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 if (k) {
                     o << ", ";
                 }
-                o << "(" << (stops[k].value - low) / (high - low) << ", "
-                  << pystr(mpl_color(stops[k].color)) << ")";
+                o << "(" << (stops[k].value - low) / (high - low) << ", ";
+                if (stops[k].rgb) {
+                    const auto& rgb = *stops[k].rgb;
+                    o << "(" << rgb[0] << ", " << rgb[1] << ", " << rgb[2] << ")";
+                } else {
+                    o << pystr(mpl_color(stops[k].color));
+                }
+                o << ")";
             }
             o << "])\n";
         }
@@ -358,7 +364,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // Colorboxes are optional; the most recently rendered image owns the
             // scale.
             if (p.colorbox) {
-                o << "fig.colorbar(ax.images[-1], ax=ax)\n";
+                o << "_gp_colorbar = fig.colorbar(ax.images[-1], ax=ax)\n";
+                if (!p.colors.label.empty())
+                    o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
             }
         }
         // Place matrix labels at their gnuplot cell coordinates (column, row).
@@ -721,6 +729,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "if _gp_xmin <= 0 <= _gp_xmax:\n";
             o << "    ax.axvline(0, color='gray', linewidth=0.7, zorder=0)\n";
             o << "    ax.set_xlim(_gp_xmin, _gp_xmax)\n";
+        }
+        if (p.equal_units) {
+            // A negative gnuplot ratio of -1 preserves equal lengths per data
+            // unit while allowing a non-square axes rectangle.
+            o << "ax.set_aspect('equal', adjustable='box')\n";
         }
         if (p.square) {
             // Keep the axes box square and Cartesian units equally scaled, even

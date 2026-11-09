@@ -165,3 +165,7 @@ test('primary-minortics', py, args: [check, exe.full_path(), meson.current_sourc
 # libgretl confidence ellipses use affine parametric equations, marginal
 # interval bounds and a point annotation at the fitted coefficient pair.
 test('confidence-ellipse', py, args: [meson.current_source_dir() / 'tests' / 'check_confidence_ellipse.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'confidence-ellipse.gp', meson.current_build_dir() / 'confidence-ellipse.py'])
+
+# libgretl contingency-table heatmap: equal aspect, RGB color stops,
+# annotated cells, colorbar title and semicolon-separated commands.
+test('confusion-matrix-heatmap', py, args: [meson.current_source_dir() / 'tests' / 'check_confusion_matrix.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'confusion-matrix.gp', meson.current_build_dir() / 'confusion-matrix-test.py'])

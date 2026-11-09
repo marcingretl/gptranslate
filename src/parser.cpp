@@ -328,8 +328,8 @@ MatrixLabels parse_matrix_labels(const std::string& spec, const std::vector<std:
     labels.comparison = match[3].str();
     return labels;
 }
-// Parse a gnuplot piecewise color palette, retaining its numeric breakpoints.
-// The comma splitter respects quoted strings and parenthesized expressions.
+// Parse gnuplot's piecewise RGB palette. Stops can use named colors or
+// normalized numeric R G B triples; mixed forms are accepted.
 std::vector<PaletteStop> parse_palette(const std::string& definition) {
     const auto left = definition.find('(');
     const auto right = definition.find_last_of(')');
@@ -340,20 +340,61 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
     std::vector<PaletteStop> stops;
     for (const auto& item : split_specs(definition.substr(left + 1, right - left - 1))) {
         std::smatch match;
-        static const std::regex stop_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
-        if (!std::regex_match(item, match, stop_re))
+        static const std::regex named_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
+        static const std::regex rgb_re(R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
+        PaletteStop stop;
+        if (std::regex_match(item, match, named_re)) {
+            const auto value = number(match[1].str());
+            if (!value)
+                throw std::runtime_error("invalid palette breakpoint: " + item);
+            stop.value = *value;
+            stop.color = match[3].str();
+        } else if (std::regex_match(item, match, rgb_re)) {
+            const auto value = number(match[1].str());
+            const auto red = number(match[2].str());
+            const auto green = number(match[3].str());
+            const auto blue = number(match[4].str());
+            if (!value || !red || !green || !blue || *red < 0 || *red > 1 || *green < 0 ||
+                *green > 1 || *blue < 0 || *blue > 1)
+                throw std::runtime_error("invalid RGB palette stop: " + item);
+            stop.value = *value;
+            stop.rgb = std::array<double, 3>{*red, *green, *blue};
+        } else {
             throw std::runtime_error("invalid palette stop: " + item);
-        const auto value = number(match[1].str());
-        if (!value) {
-            throw std::runtime_error("invalid palette breakpoint: " + item);
         }
-        if (!stops.empty() && *value <= stops.back().value)
+        if (!stops.empty() && stop.value <= stops.back().value)
             throw std::runtime_error("palette breakpoints must be strictly increasing");
-        stops.push_back({*value, match[3].str()});
+        stops.push_back(std::move(stop));
     }
     if (stops.size() < 2)
         throw std::runtime_error("palette requires at least two color stops");
     return stops;
+}
+// Split several gnuplot commands written on one line, without splitting
+// quoted semicolons or separators embedded inside parentheses.
+std::vector<std::string> split_commands(const std::string& line) {
+    std::vector<std::string> commands;
+    char quote = 0;
+    int depth = 0;
+    size_t begin = 0;
+    for (size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (quote) {
+            if (c == quote && (i == 0 || line[i - 1] != '\\'))
+                quote = 0;
+        } else if (c == '\'' || c == '"') {
+            quote = c;
+        } else if (c == '(') {
+            ++depth;
+        } else if (c == ')' && depth > 0) {
+            --depth;
+        } else if (c == ';' && depth == 0) {
+            commands.push_back(trim(line.substr(begin, i - begin)));
+            begin = i + 1;
+        }
+    }
+    commands.push_back(trim(line.substr(begin)));
+    return commands;
 }
 // Parse named tic positions without conflating commas inside quoted labels.
 void parse_tics(Tics& tics, const std::string& spec) {
@@ -763,6 +804,37 @@ ParseResult parse(const std::string& source) {
         lines.push_back(line);
     }
     resolve_conditionals(lines, result.errors);
+    // Expand command chains only outside named data blocks. Record source line
+    // numbers so diagnostics still point to the original gnuplot script.
+    std::vector<std::string> expanded;
+    std::vector<size_t> source_lines;
+    std::string block_terminator;
+    static const std::regex data_declaration(
+        R"(^\$[A-Za-z_][A-Za-z0-9_]*\s*<<\s*([A-Za-z_][A-Za-z0-9_]*)\s*$)");
+    for (size_t source_line = 0; source_line < lines.size(); ++source_line) {
+        const auto raw = trim(lines[source_line]);
+        std::smatch declaration;
+        if (!block_terminator.empty()) {
+            expanded.push_back(lines[source_line]);
+            source_lines.push_back(source_line + 1);
+            if (raw == block_terminator)
+                block_terminator.clear();
+        } else if (std::regex_match(raw, declaration, data_declaration)) {
+            block_terminator = declaration[1].str();
+            expanded.push_back(lines[source_line]);
+            source_lines.push_back(source_line + 1);
+        } else if (raw.empty() || raw[0] == '#') {
+            // Comments and empty lines are not command chains.
+            expanded.push_back(lines[source_line]);
+            source_lines.push_back(source_line + 1);
+        } else {
+            for (const auto& command : split_commands(lines[source_line])) {
+                expanded.push_back(command);
+                source_lines.push_back(source_line + 1);
+            }
+        }
+    }
+    lines = std::move(expanded);
     // Detect gretl's decimal-comma numeric output before splitting plot lists.
     // Axis ranges and inline data rows provide unambiguous evidence; quoted
     // labels and syntactic commas (e.g. `set size 1.0,1.0`) do not.
@@ -791,7 +863,7 @@ ParseResult parse(const std::string& source) {
                         R"(^(\$[A-Za-z_][A-Za-z0-9_]*)\s*<<\s*([A-Za-z_][A-Za-z0-9_]*)\s*$)"))) {
                 const std::string name = block[1].str(), terminator = block[2].str();
                 std::vector<std::string> rows;
-                const size_t declaration_line = i + 1;
+                const size_t declaration_line = source_lines[i];
                 bool closed = false;
                 while (++i < lines.size()) {
                     if (trim(lines[i]) == terminator) {
@@ -912,6 +984,11 @@ ParseResult parse(const std::string& source) {
                 p->ytics_disabled = false;
                 continue;
             }
+            // Reset text annotations before libgretl writes per-cell labels.
+            if (s == "unset label") {
+                p->labels.clear();
+                continue;
+            }
             if (starts(s, "set label ")) {
                 // Accept libgretl labels in either data or graph coordinates.
                 // Decimal commas in data coordinates must not be mistaken for
@@ -921,7 +998,7 @@ ParseResult parse(const std::string& source) {
                 static const std::regex point_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+)\s+center\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)\s+center(?:\s+(?:front|back))*\s*$)GP");
                 std::smatch match;
                 if (std::regex_match(s, match, graph_label_re)) {
                     const auto x = number(match[3].str()), y = number(match[4].str());
@@ -1031,6 +1108,19 @@ ParseResult parse(const std::string& source) {
             // multiplot panel; do not treat `square` as two numeric dimensions.
             if (s == "set size square") {
                 p->square = true;
+                p->equal_units = false;
+                continue;
+            }
+            // Gnuplot's negative ratio -1 means identical lengths per x/y unit,
+            // not necessarily a square axes box when ranges are different.
+            if (s == "set size ratio -1") {
+                p->equal_units = true;
+                p->square = false;
+                continue;
+            }
+            if (s == "set size noratio" || s == "set size nosquare") {
+                p->equal_units = false;
+                p->square = false;
                 continue;
             }
             // The size and origin settings describe the next panel in normalized
@@ -1147,6 +1237,19 @@ ParseResult parse(const std::string& source) {
                 set_range(range, s);
                 p->colors.min = range.min;
                 p->colors.max = range.max;
+                continue;
+            }
+            // Only the RGB model is currently mapped to Matplotlib's RGB map.
+            if (s == "set palette model RGB")
+                continue;
+            if (starts(s, "set cblabel")) {
+                if (!text_command(s, "set cblabel"))
+                    throw std::runtime_error("unsupported colorbox label: " + s);
+                p->colors.label = quoted(s.substr(std::string("set cblabel").size()));
+                continue;
+            }
+            if (s == "unset cblabel") {
+                p->colors.label.clear();
                 continue;
             }
             if (starts(s, "set palette defined ")) {
@@ -1738,7 +1841,7 @@ ParseResult parse(const std::string& source) {
                 throw std::runtime_error("unsupported gnuplot command: " + s);
             throw std::runtime_error("unrecognized command: " + s);
         } catch (const std::exception& e) {
-            result.errors.push_back({i + 1, e.what()});
+            result.errors.push_back({source_lines[i], e.what()});
         }
     }
     return result;

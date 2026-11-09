@@ -26,6 +26,7 @@ gnuplot script (.gp) -> C++ parser -> plot intermediate representation (IR)
 - Translation of common libgretl plot scripts, including line and point plots, regression fits, diagnostic plots, time-series plots, histograms, boxplots, filled curves, error bars (including VAR bootstrap quantile intervals), and matrix/image plots.
 - Native, dependency-free Matplotlib hover tooltips for `with points` and `with linespoints`: show Cartesian `(x, y)` coordinates when the cursor is over a marker, including transformed VAR inverse roots and subplot panels. Ordinary lines and the unit circle do not acquire tooltips.
 - Plot properties such as axes, ticks, legends, labels, colors, palettes, log scales, secondary axes, and explicitly positioned multiplot panels.
+- Contingency-table heatmaps from libgretl, including normalized numeric RGB palette stops, colorbar labels, equal x/y data-unit scaling (`set size ratio -1`), and cell counts written via semicolon-separated `set label` commands.
 - Inline data, named data blocks, selected external data files, and supported gnuplot expressions and conditionals.
 - Compatibility features for gretl/gretl4py, including gnuplot version probing and an optional plot queue for `-persist` calls.
 - Regression tests using scripts from libgretl and gretl packages, including BACE, ParMA, BVAR and SVAR examples.
@@ -128,6 +129,25 @@ By default, automatic contrast is enabled for combined plots; `GPTRANSLATE_AUTO_
 When `GRETL4PY_PLOT_QUEUE` points to an **existing directory**, a `-persist` invocation without explicit `--output` writes a uniquely named `.py` file there using an atomic rename from `.tmp`. The caller must create, protect, and drain the queue. By default, queued scripts contain **no `plt.show()`**: after evaluating all scripts, gretl4py can display their figures together using `plt.show(block=False)` when its `auto_show` setting is enabled. `gp-executor` remains agnostic about gretl4py and does not run Python. An explicit `--add-show` also works in queue mode, but callers that manage display should not use it. Ordinary translations write a `.py` file beside the input `.gp` by default. A libgretl `GPVAL_VERSION` probe is handled without Matplotlib.
 
 **Important:** `--output` on **gp-executor** names a generated Python file. Do not confuse this with gretl's `--output` option, which controls where gretl writes its plotting output.
+
+### Contingency-table heatmaps
+
+`gp-executor` translates the libgretl heatmap form `plot $colors matrix with image` with
+`set palette model RGB`, `set palette defined (0 1 1 1, ... )`, `set cbrange`,
+`set cblabel`, and `set size ratio -1`. Numerical RGB triples are interpreted as
+normalized components in `[0, 1]`; quoted color names and hexadecimal colors
+remain supported. Palette stops may use either representation.
+
+Cell annotations supplied as `unset label; set label "N" at X,Y center front; ...`
+are parsed as separate commands, retaining their original cell coordinates and
+appearance above the heatmap. Only supported gnuplot labels and palette syntax
+are translated; arbitrary gnuplot color models and label expressions are not
+silently ignored.
+
+```sh
+./build/gp-executor --output=/tmp/confusion.py tests/confusion-matrix.gp
+# Display-neutral by default; no plt.show() is appended.
+```
 
 ## Scope and limitations
 
