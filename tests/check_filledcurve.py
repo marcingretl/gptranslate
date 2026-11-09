@@ -6,8 +6,9 @@ import subprocess
 import sys
 
 executor, source, output = sys.argv[1:]
-subprocess.run([executor, '--emit-python', source], check=True)
-script = pathlib.Path(source).with_suffix('.py')
+# Always write the translated script to the build output, not beside a source fixture.
+subprocess.run([executor, '--emit-python', '--output', output, source], check=True)
+script = pathlib.Path(output)
 text = script.read_text()
 # Filled bands must be rendered behind points and lines.
 # Verify the configured fill opacity and absence of a border.
@@ -22,4 +23,3 @@ first_y = next(line for line in text.splitlines() if line.startswith('y = '))
 assert abs(ast.literal_eval(first_y[4:])[0] - (11.63255023 - 0.1)) < 1e-9
 upper = next(line for line in text.splitlines() if line.startswith('upper = '))
 assert abs(ast.literal_eval(upper[8:])[0] - (11.63255023 + 0.1)) < 1e-9
-pathlib.Path(output).write_text(text)

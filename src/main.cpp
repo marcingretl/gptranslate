@@ -90,8 +90,8 @@ int main(int argc, char** argv) {
         std::string input;
         std::string output;
         bool persist = false;
-        // Let embedding applications control when figures are displayed.
-        bool show = true;
+        // Generate display-neutral Python; callers decide whether to show figures.
+        bool show = false;
         // An empty backend leaves Matplotlib's default backend selection unchanged.
         std::string backend_name;
         bool auto_contrast = true;
@@ -112,7 +112,12 @@ int main(int argc, char** argv) {
                 // libgretl uses -persist for interactive plots.
                 persist = true;
                 continue;
+            } else if (arg == "--add-show") {
+                // Request an explicit plt.show() in the generated Python script.
+                show = true;
+                continue;
             } else if (arg == "--no-show") {
+                // Preserve compatibility with callers using the old opt-out flag.
                 show = false;
                 continue;
             } else if (arg == "--backend") {
@@ -139,7 +144,7 @@ int main(int argc, char** argv) {
                 output = arg.substr(9);
             } else if (arg == "--help") {
                 std::cout << "gp-executor [--output=SCRIPT.py] "
-                             "[--auto-contrast|--no-auto-contrast] [--no-show] "
+                             "[--auto-contrast|--no-auto-contrast] [--add-show|--no-show] "
                              "[--backend=NAME] [-persist] [script.gp]\n"
                              "Translate gnuplot source to Python/matplotlib; never execute "
                              "it.\n";
@@ -206,7 +211,7 @@ int main(int argc, char** argv) {
         gptranslate::MatplotlibBackend backend(auto_contrast, show, backend_name);
         const std::string python = backend.generate(result.document);
         // Queue only libgretl's interactive invocations. Explicit --output
-        // and standalone translation retain their previous behavior.
+        // retains ordinary file output; scripts are display-neutral by default.
         const char* queue = std::getenv("GRETL4PY_PLOT_QUEUE");
         if (persist && output.empty() && queue != nullptr && *queue != '\0') {
             // Queue publication is sufficient; callers do not consume a path on

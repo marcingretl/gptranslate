@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert default.startswith('import matplotlib.pyplot as plt\n')
     assert "matplotlib.use('QtAgg')" not in default
     assert 'from PySide6 import QtCore' not in default
-    assert default.endswith('plt.show()\n')
+    assert 'plt.show()' not in default
 
     header = ("from PySide6 import QtCore\n"
               "import matplotlib\n"
@@ -30,14 +30,17 @@ with tempfile.TemporaryDirectory() as tmp:
               "import matplotlib.pyplot as plt\n")
     qt_agg = generate('--backend=QtAgg')
     assert qt_agg.startswith(header)
-    assert qt_agg.endswith('plt.show()\n')
+    assert 'plt.show()' not in qt_agg
     assert qt_agg[len(header):] == default[len('import matplotlib.pyplot as plt\n'):]
 
-    # Backend selection and display suppression are independent options.
+    # Backend selection and explicit display are independent options.
+    qt_agg_show = generate('--backend=QtAgg', '--add-show')
+    assert qt_agg_show.startswith(header)
+    assert qt_agg_show == qt_agg + 'plt.show()\n'
+
+    # The old opt-out option remains accepted for backward compatibility.
     qt_agg_no_show = generate('--backend=QtAgg', '--no-show')
-    assert qt_agg_no_show.startswith(header)
-    assert 'plt.show()' not in qt_agg_no_show
-    assert qt_agg_no_show == qt_agg.removesuffix('plt.show()\n')
+    assert qt_agg_no_show == qt_agg
 
     # Other Matplotlib backends do not load Qt or PySide6.
     for name in ('TkAgg', 'Agg'):
@@ -45,7 +48,8 @@ with tempfile.TemporaryDirectory() as tmp:
         expected = f"import matplotlib\nmatplotlib.use('{name}')\nimport matplotlib.pyplot as plt\n"
         assert code.startswith(expected)
         assert 'from PySide6' not in code
-        assert code.endswith('plt.show()\n')
+        assert 'plt.show()' not in code
+        assert generate(f'--backend={name}', '--add-show') == code + 'plt.show()\n'
         assert generate('--backend', name) == code
 
     # Explicitly empty backend preserves the default header exactly.

@@ -12,7 +12,7 @@ assert result.returncode == 0, result.stderr
 assert path.is_file(), "no Python file generated"
 code = path.read_text(encoding="utf-8")
 ast.parse(code)
-assert "plt.show()" in code, "missing interactive show"
+assert "plt.show()" not in code, "unexpected interactive show in default output"
 assert "savefig(" not in code, "unexpected file rendering"
 assert "matplotlib.use('Agg')" not in code, "unexpected headless backend"
 assert "import matplotlib.pyplot as plt" in code

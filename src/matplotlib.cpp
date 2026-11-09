@@ -864,8 +864,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     }
     if (hover_points)
         emit_point_hover(o);
-    // The generated script is interactive; execution is owned by the caller.
-    // Embedded callers can manage display themselves via --no-show.
+    // Generated scripts are display-neutral by default; --add-show explicitly
+    // requests an interactive display statement at the end of the script.
     if (show_) {
         o << "plt.show()\n";
     }

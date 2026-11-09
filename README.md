@@ -58,8 +58,8 @@ To install into a custom prefix, pass `--prefix=/your/prefix` to `meson setup`.
 
 ```sh
 ./build/gp-executor tests/passengers.gp
-# Writes tests/passengers.py; no plot is displayed by gp-executor.
-python3 tests/passengers.py
+# Writes tests/passengers.py without plt.show(); gp-executor never executes it.
+python3 tests/passengers.py  # Creates the figure, but does not show a GUI window.
 ```
 
 Select a Python output file explicitly:
@@ -69,15 +69,18 @@ Select a Python output file explicitly:
 python3 /tmp/passengers.py
 ```
 
-By default, the generated Python script includes `plt.show()`. For integration with applications that create and manage Matplotlib figures themselves, use `--no-show`:
+By default, generated Python is **display-neutral**: it creates a figure without calling `plt.show()`. This lets embedding applications such as gretl4py control display and execute several generated scripts without an implicit blocking GUI call.
+
+To create a **standalone, self-displaying script**, request `--add-show`:
 
 ```sh
-./build/gp-executor --no-show --output=/tmp/passengers.py tests/passengers.gp
+./build/gp-executor --add-show --output=/tmp/passengers.py tests/passengers.gp
+python3 /tmp/passengers.py
 ```
 
-The resulting script creates the figure without calling `plt.show()`; the embedding application is responsible for displaying it and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script. The option does not itself fix Windows/TkAgg window-lifetime issues.
+This appends `plt.show()` to the generated script. The historical `--no-show` flag remains accepted for compatibility, but is redundant because omitting `plt.show()` is now the default. For display-neutral scripts, the embedding application is responsible for displaying figures and managing the GUI event loop. In particular, non-blocking display may require additional event-loop integration in a command-line Python script; `--add-show` does not by itself fix Windows/TkAgg window-lifetime issues.
 
-Point tooltips work with an interactive Matplotlib backend (such as QtAgg or TkAgg) once the figure is displayed. They are enabled by default for `with points` and `with linespoints`, including when the generated script uses `--no-show`; they do not require `mplcursors`. The annotation disappears when the pointer leaves a marker or switches panels. Headless renderers such as `Agg` do not provide interactive hover to an end user.
+Point tooltips work with an interactive Matplotlib backend (such as QtAgg or TkAgg) once the figure is displayed. They are enabled by default for `with points` and `with linespoints`, including when the generated script omits `plt.show()`; they do not require `mplcursors`. The annotation disappears when the pointer leaves a marker or switches panels. Headless renderers such as `Agg` do not provide interactive hover to an end user.
 
 To explicitly select a **Matplotlib backend** in the generated Python, use `--backend=NAME`. For example, to select **QtAgg using PySide6** when testing plot-window behavior on Windows:
 
@@ -96,7 +99,7 @@ import matplotlib.pyplot as plt
 
 Other backend names, such as `TkAgg` or the non-interactive `Agg`, are passed directly to `matplotlib.use()` without importing PySide6. For example, `--backend=Agg` generates `matplotlib.use('Agg')` before importing `pyplot`. This option can also be written as `--backend NAME`; `--backend=""` is equivalent to omitting the option and leaves backend selection to Matplotlib.
 
-`--backend` is opt-in on every platform; gretl4py may choose `--backend=QtAgg` only on Windows. Backend selection can be combined with `--no-show`. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
+`--backend` is opt-in on every platform; gretl4py may choose `--backend=QtAgg` only on Windows. Backend selection can be combined with `--add-show` when explicit display is wanted. The translator itself does not import Qt or Matplotlib. Backend selection should happen before other code initializes a different Matplotlib GUI backend; switching an already active GUI backend may fail. Selecting QtAgg does **not** by itself guarantee that non-blocking windows remain open without an active Qt event loop.
 
 The translator also reads gnuplot input from standard input when no input filename is supplied:
 
@@ -109,7 +112,8 @@ The translator also reads gnuplot input from standard input when no input filena
 | Option | Effect |
 | --- | --- |
 | `--output=FILE.py` | Write the translated Python source to `FILE.py` |
-| `--no-show` | Omit the final `plt.show()` in generated Python; the caller must manage display |
+| `--add-show` | Append `plt.show()` to generated Python (off by default) |
+| `--no-show` | Keep output display-neutral; retained as a compatibility alias for the default |
 | `--backend=NAME` | Select a Matplotlib backend in the generated Python (`QtAgg`, `TkAgg`, `Agg`, etc.); empty means default |
 | `--auto-contrast` | Enable automatic contrasting colors for combined plots |
 | `--no-auto-contrast` | Preserve original plot colors |
@@ -121,7 +125,7 @@ By default, automatic contrast is enabled for combined plots; `GPTRANSLATE_AUTO_
 
 ### gretl4py integration and plot queue
 
-When `GRETL4PY_PLOT_QUEUE` points to an **existing directory**, a `-persist` invocation without explicit `--output` writes a uniquely named `.py` file there using an atomic rename from `.tmp`. The caller must create, protect, and drain the queue. Ordinary translations write a `.py` file beside the input `.gp` by default. A libgretl `GPVAL_VERSION` probe is handled without Matplotlib.
+When `GRETL4PY_PLOT_QUEUE` points to an **existing directory**, a `-persist` invocation without explicit `--output` writes a uniquely named `.py` file there using an atomic rename from `.tmp`. The caller must create, protect, and drain the queue. By default, queued scripts contain **no `plt.show()`**: after evaluating all scripts, gretl4py can display their figures together using `plt.show(block=False)` when its `auto_show` setting is enabled. `gp-executor` remains agnostic about gretl4py and does not run Python. An explicit `--add-show` also works in queue mode, but callers that manage display should not use it. Ordinary translations write a `.py` file beside the input `.gp` by default. A libgretl `GPVAL_VERSION` probe is handled without Matplotlib.
 
 **Important:** `--output` on **gp-executor** names a generated Python file. Do not confuse this with gretl's `--output` option, which controls where gretl writes its plotting output.
 

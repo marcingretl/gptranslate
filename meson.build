@@ -81,6 +81,12 @@ test('parma-zorder', py, args: [meson.current_source_dir() / 'tests' / 'check_zo
 # Backend selection is opt-in and must precede pyplot without requiring GUI toolkits for translation tests.
 test('backend-header', py, args: [meson.current_source_dir() / 'tests' / 'check_backend.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'basic.gp'])
 
+# The QtAgg-specific regression uses the supported --backend flag, not legacy --qtagg.
+test('qtagg-header', py, args: [meson.current_source_dir() / 'tests' / 'check_qtagg.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'basic.gp'])
+
+# Default output and queued package plots must omit blocking plt.show().
+test('show-mode', py, args: [meson.current_source_dir() / 'tests' / 'check_show_mode.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'basic.gp'])
+
 # Auto-contrast defaults on for combined plots and supports explicit opt-out.
 test('auto-contrast', py, args: [meson.current_source_dir() / 'tests' / 'check_auto_contrast.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'parma-kernel.gp'])
 
