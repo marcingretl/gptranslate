@@ -173,3 +173,9 @@ test('confusion-matrix-heatmap', py, args: [meson.current_source_dir() / 'tests'
 # CUSUM functions preceding their inline observations must sample over the
 # observation x range instead of Matplotlib's initial (0, 1) axes limits.
 test('cusum-analytic-domain', py, args: [meson.current_source_dir() / 'tests' / 'check_cusum.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cusum.gp', meson.current_build_dir() / 'cusum-test.py'])
+
+# libgretl's FREQ plots overlay normalized histogram bars with analytical
+# normal/gamma densities using scalar assignments (mu/sigma/alpha/beta).
+# The gamma case must evaluate in log space for large shape parameters.
+test('freq-normal-density', py, args: [meson.current_source_dir() / 'tests' / 'check_freq_density.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'freq-normal.gp', meson.current_build_dir() / 'freq-normal.py', 'normal'])
+test('freq-gamma-density', py, args: [meson.current_source_dir() / 'tests' / 'check_freq_density.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'freq-gamma.gp', meson.current_build_dir() / 'freq-gamma.py', 'gamma'])

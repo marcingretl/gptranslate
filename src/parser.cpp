@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <regex>
@@ -32,10 +33,12 @@
 namespace gptranslate {
 namespace {
 // Translate a restricted arithmetic expression without executing source text.
-// The lexer accepts numbers, x, supported math functions and arithmetic only.
+// The lexer accepts numbers, x, assigned scalars, supported math functions,
+// the constant pi, and arithmetic only.
 // Invalid expressions are rejected instead of being silently reduced to a
 // constant.
-std::optional<std::string> analytic_expression(const std::string& input) {
+std::optional<std::string> analytic_expression(
+    const std::string& input, const std::map<std::string, double>& variables) {
     static const std::regex token(
         R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|[+*/()\-])");
     std::string result;
@@ -57,12 +60,21 @@ std::optional<std::string> analytic_expression(const std::string& input) {
             word = "value";
             contains_x = true;
         } else if (word == "log" || word == "exp" || word == "sqrt" || word == "sin" ||
-                   word == "cos") {
+                   word == "cos" || word == "lgamma") {
             word = "math." + word;
+        } else if (word == "pi") {
+            word = "math.pi";
         } else if (word == "abs") {
             // Python's built-in abs() has the same scalar meaning.
         } else if (std::isalpha(static_cast<unsigned char>(word[0])) || word[0] == '_') {
-            return std::nullopt;
+            // Substitute only scalars assigned earlier in the active script.
+            // Parenthesize substitutions so negative values preserve precedence.
+            const auto found = variables.find(word);
+            if (found == variables.end())
+                return std::nullopt;
+            std::ostringstream value;
+            value << std::setprecision(17) << found->second;
+            word = "(" + value.str() + ")";
         } else if (std::isdigit(static_cast<unsigned char>(word[0])) || word[0] == '.' ||
                    word[0] == ',') {
             std::replace(word.begin(), word.end(), ',', '.');
@@ -341,7 +353,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
     for (const auto& item : split_specs(definition.substr(left + 1, right - left - 1))) {
         std::smatch match;
         static const std::regex named_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
-        static const std::regex rgb_re(R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
+        static const std::regex rgb_re(
+            R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
         PaletteStop stop;
         if (std::regex_match(item, match, named_re)) {
             const auto value = number(match[1].str());
@@ -354,8 +367,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
             const auto red = number(match[2].str());
             const auto green = number(match[3].str());
             const auto blue = number(match[4].str());
-            if (!value || !red || !green || !blue || *red < 0 || *red > 1 || *green < 0 ||
-                *green > 1 || *blue < 0 || *blue > 1)
+            if (!value || !red || !green || !blue || *red < 0 || *red > 1 ||
+                *green < 0 || *green > 1 || *blue < 0 || *blue > 1)
                 throw std::runtime_error("invalid RGB palette stop: " + item);
             stop.value = *value;
             stop.rgb = std::array<double, 3>{*red, *green, *blue};
@@ -773,7 +786,11 @@ void resolve_conditionals(std::vector<std::string>& lines, std::vector<Diagnosti
                         errors.push_back({line_number, e.what()});
                     }
                 }
-                lines[index++].clear();
+                // Keep active assignments for the plot parser: theoretical
+                // distributions refer to sigma, mu, alpha and beta later on.
+                if (!active)
+                    lines[index].clear();
+                ++index;
                 continue;
             }
             if (!active) {
@@ -795,6 +812,9 @@ ParseResult parse(const std::string& source) {
     std::pair<double, double> trange{-5.0, 5.0};
     std::string previous_file;
     std::map<std::string, std::vector<std::string>> external_data;
+    // Keep scalar definitions local and in source order. The conditional pass
+    // selects active lines; this pass resolves values at each plot command.
+    std::map<std::string, double> plot_scalars;
     std::istringstream input(source);
     std::vector<std::string> lines;
     std::string line;
@@ -880,6 +900,16 @@ ParseResult parse(const std::string& source) {
             }
         }
         try {
+            // Preserve active scalar assignments in the plotting environment.
+            // Never execute arbitrary gnuplot text as Python source.
+            std::smatch scalar_assignment;
+            static const std::regex scalar_pattern(
+                R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
+            if (std::regex_match(s, scalar_assignment, scalar_pattern)) {
+                plot_scalars[scalar_assignment[1].str()] =
+                    scalar_value(scalar_assignment[2].str(), plot_scalars);
+                continue;
+            }
             // Linetype definitions are global and may precede the plot command.
             if (starts(s, "set linetype ")) {
                 std::smatch m;
@@ -1537,7 +1567,35 @@ ParseResult parse(const std::string& source) {
                             if (pos != std::string::npos) {
                                 expr_end = std::min(expr_end, pos);
                             }
-                        analytic_value = analytic_expression(trim(spec.substr(0, expr_end)));
+                        const auto formula = trim(spec.substr(0, expr_end));
+                        analytic_value = analytic_expression(formula, plot_scalars);
+                        // gretl's FREQ gamma overlay is written as products of
+                        // huge powers and gamma functions. Evaluate its log-density
+                        // instead: direct exponentiation overflows for large alpha.
+                        std::string compact;
+                        for (const char c : formula)
+                            if (!std::isspace(static_cast<unsigned char>(c)))
+                                compact += c;
+                        if (compact ==
+                            "x**(alpha-1.0)*exp(-x/beta)/(exp(lgamma(alpha))*(beta**alpha))") {
+                            const auto a = plot_scalars.find("alpha");
+                            const auto b = plot_scalars.find("beta");
+                            if (a != plot_scalars.end() && b != plot_scalars.end() &&
+                                a->second > 0 && b->second > 0) {
+                                std::ostringstream shape, scale;
+                                shape << std::setprecision(17) << a->second;
+                                scale << std::setprecision(17) << b->second;
+                                const std::string alpha = "(" + shape.str() + ")";
+                                const std::string beta = "(" + scale.str() + ")";
+                                analytic_value =
+                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" +
+                                    beta + "-math.lgamma(" + alpha + ")-" + alpha +
+                                    "*math.log(" + beta + ")) if value > 0 else " +
+                                    "(0.0 if " + alpha + " > 1.0 else " +
+                                    "(1.0/" + beta + " if " + alpha +
+                                    " == 1.0 else float('inf'))))";
+                            }
+                        }
                     }
                     if (!inline_data && !constant_value && !analytic_value) {
                         auto found = d.data_blocks.find(src);

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fixed libgretl `freq` overlays with theoretical normal and gamma densities.
+  The analytic parser now resolves previously assigned scalar parameters,
+  recognizes gnuplot `pi` and `lgamma`, and preserves scalar assignments
+  across conditional selection. The FREQ gamma formula is evaluated in log
+  space to prevent overflow for large shape parameters (e.g., near 5952).
+  Added normal/gamma fixtures reconstructed from `graphing.c` and headless
+  tests of histogram normalization, density values and figure generation.
+
 - Fixed the x domain for analytic functions that appear before inline observations in the same plot command (libgretl CUSUM confidence bounds). When no explicit `set xrange` is supplied, the functions now use the full x range of the plot data rather than Matplotlib's default `(0, 1)` limits. Added a real CUSUM fixture and a headless regression covering both confidence bounds, observations, colors and the zero reference axis.
 
 - Added libgretl contingency-table heatmap compatibility: `set size ratio -1` (equal x/y data-unit scaling), `set palette model RGB`, normalized numeric RGB triples in `set palette defined`, colorbar titles via `set cblabel`, `unset label`, and `set label "..." at x,y center front`. Semicolon-separated commands on one source line are now expanded outside named data blocks while preserving source line diagnostics. Added a real 3x3 confusion-matrix fixture and a headless Matplotlib runtime regression checking exact matrix values, color-scale range, color stops, colorbar title and all nine cell labels.

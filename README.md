@@ -184,3 +184,16 @@ Copyright (C) 2026 Marcin Błażejowski. Released under the GNU General Public L
 The project targets compatibility with gretl/libgretl, but is a separate project. gretl and gnuplot are third-party projects and their names do not imply endorsement. Test fixtures derived from third-party sources should retain any applicable notices; contributors must check provenance before redistributing additional fixtures.
 
 Substantial assistance from ChatGPT is acknowledged above and in [AUTHORS.md](AUTHORS.md).
+
+### Frequency plots with theoretical distributions
+
+The `freq` scripts emitted by libgretl can overlay normalized histogram
+bars with a normal or gamma density. `gptranslate` supports the scalar
+assignments used by these plots (`mu`, `sigma`, `alpha`, and `beta`) along
+with gnuplot's constant `pi` and the `lgamma` function. Scalar values
+are substituted from active definitions rather than executing arbitrary
+source expressions. Gamma density overlays use log-space evaluation to
+avoid numerical overflow for large shape parameters.
+
+The generated Python plots remain display-neutral by default; the calling
+application decides when to show them.
