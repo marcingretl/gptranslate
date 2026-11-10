@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the x domain for analytic functions that appear before inline observations in the same plot command (libgretl CUSUM confidence bounds). When no explicit `set xrange` is supplied, the functions now use the full x range of the plot data rather than Matplotlib's default `(0, 1)` limits. Added a real CUSUM fixture and a headless regression covering both confidence bounds, observations, colors and the zero reference axis.
+
 - Added libgretl contingency-table heatmap compatibility: `set size ratio -1` (equal x/y data-unit scaling), `set palette model RGB`, normalized numeric RGB triples in `set palette defined`, colorbar titles via `set cblabel`, `unset label`, and `set label "..." at x,y center front`. Semicolon-separated commands on one source line are now expanded outside named data blocks while preserving source line diagnostics. Added a real 3x3 confusion-matrix fixture and a headless Matplotlib runtime regression checking exact matrix values, color-scale range, color stops, colorbar title and all nine cell labels.
 
 - **Changed default display policy:** generated Python scripts no longer append `plt.show()` unless explicitly requested with the new `--add-show` option. This also makes `-persist` plot-queue entries display-neutral by default, allowing gretl4py to evaluate the whole batch before invoking non-blocking display according to its `auto_show` policy. `--no-show` remains accepted as a backward-compatible no-op for the default. Updated CLI help, README and regression tests for direct translation, selected backends and queued plots. This change supersedes the earlier `--no-show` opt-out behavior described below.

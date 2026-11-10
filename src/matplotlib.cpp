@@ -380,6 +380,18 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "        ax.text(column_index, row_index, " << pystr(labels.format)
               << " % value, color=color, ha='center', va='center')\n";
         }
+        // Analytic functions may precede inline data in a single gnuplot plot
+        // command. Determine their x domain from all plotted data series rather
+        // than from Matplotlib's initial (0, 1) axes limits.
+        std::optional<double> data_x_min, data_x_max;
+        for (const auto& source : p.series) {
+            for (const auto& point : source.points) {
+                if (!std::isfinite(point.x))
+                    continue;
+                data_x_min = data_x_min ? std::min(*data_x_min, point.x) : point.x;
+                data_x_max = data_x_max ? std::max(*data_x_max, point.x) : point.x;
+            }
+        }
         // In auto-contrast mode, distinguish graphical roles in combined plots.
         // Single-series plots retain their original source colors.
         // Colors are assigned by role and occurrence, not by the source's palette.
@@ -445,7 +457,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 // Never silently misrepresent a polar function as y = f(x).
                 if (p.polar)
                     throw std::runtime_error("polar analytic functions are not supported");
-                // Sample a validated analytic function over the specified x range.
+                // Sample the validated function over the explicit x range, or
+                // over the full data x range when functions precede data series.
                 // math functions are evaluated pointwise; invalid domain points become
                 // NaN.
                 if (s.style != Style::Lines) {
@@ -454,13 +467,19 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "x_min, x_max = ";
                 if (p.x.min) {
                     o << std::setprecision(17) << *p.x.min;
-                } else
+                } else if (data_x_min) {
+                    o << std::setprecision(17) << *data_x_min;
+                } else {
                     o << "ax.get_xlim()[0]";
+                }
                 o << ", ";
                 if (p.x.max) {
                     o << std::setprecision(17) << *p.x.max;
-                } else
+                } else if (data_x_max) {
+                    o << std::setprecision(17) << *data_x_max;
+                } else {
                     o << "ax.get_xlim()[1]";
+                }
                 o << "\n";
                 o << "x = [x_min + (x_max - x_min)*i/199 for i in range(200)]\n";
                 o << "import math\n";

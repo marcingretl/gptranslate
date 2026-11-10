@@ -169,3 +169,7 @@ test('confidence-ellipse', py, args: [meson.current_source_dir() / 'tests' / 'ch
 # libgretl contingency-table heatmap: equal aspect, RGB color stops,
 # annotated cells, colorbar title and semicolon-separated commands.
 test('confusion-matrix-heatmap', py, args: [meson.current_source_dir() / 'tests' / 'check_confusion_matrix.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'confusion-matrix.gp', meson.current_build_dir() / 'confusion-matrix-test.py'])
+
+# CUSUM functions preceding their inline observations must sample over the
+# observation x range instead of Matplotlib's initial (0, 1) axes limits.
+test('cusum-analytic-domain', py, args: [meson.current_source_dir() / 'tests' / 'check_cusum.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cusum.gp', meson.current_build_dir() / 'cusum-test.py'])

@@ -24,6 +24,7 @@ gnuplot script (.gp) -> C++ parser -> plot intermediate representation (IR)
 ## Features
 
 - Translation of common libgretl plot scripts, including line and point plots, regression fits, diagnostic plots, time-series plots, histograms, boxplots, filled curves, error bars (including VAR bootstrap quantile intervals), and matrix/image plots.
+- Analytic confidence bounds (including CUSUM plots) are evaluated on the data-derived horizontal range even when the function specifications precede the inline observations.
 - Native, dependency-free Matplotlib hover tooltips for `with points` and `with linespoints`: show Cartesian `(x, y)` coordinates when the cursor is over a marker, including transformed VAR inverse roots and subplot panels. Ordinary lines and the unit circle do not acquire tooltips.
 - Plot properties such as axes, ticks, legends, labels, colors, palettes, log scales, secondary axes, and explicitly positioned multiplot panels.
 - Contingency-table heatmaps from libgretl, including normalized numeric RGB palette stops, colorbar labels, equal x/y data-unit scaling (`set size ratio -1`), and cell counts written via semicolon-separated `set label` commands.
