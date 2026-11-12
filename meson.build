@@ -1,4 +1,4 @@
-project('gptranslate', 'cpp', version: '0.12.0', default_options: ['cpp_std=c++17', 'warning_level=2'])
+project('gptranslate', 'cpp', version: '0.12.1-git', default_options: ['cpp_std=c++17', 'warning_level=2'])
 # Older libstdc++ versions (notably GCC 8) require -lstdc++fs for C++17
 # std::filesystem. Test the actual link rather than the compiler version,
 # since Clang can also use an older libstdc++ implementation.
@@ -22,7 +22,13 @@ endif
 
 inc = include_directories('include')
 core = static_library('gptranslate', ['src/parser.cpp', 'src/matplotlib.cpp'], include_directories: inc, install: false)
-exe = executable('gp-executor', 'src/main.cpp', link_with: core, include_directories: inc, link_args: filesystem_link_args, install: true)
+# Pass the Meson project version to gp-executor without duplicating it in C++.
+exe = executable('gp-executor', 'src/main.cpp',
+  link_with: core,
+  include_directories: inc,
+  cpp_args: ['-DGPTRANSLATE_VERSION="' + meson.project_version() + '"'],
+  link_args: filesystem_link_args,
+  install: true)
 
 # Translation tests must not execute matplotlib or create PNG files.
 py = import('python').find_installation('python3')

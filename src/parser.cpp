@@ -37,8 +37,8 @@ namespace {
 // the constant pi, and arithmetic only.
 // Invalid expressions are rejected instead of being silently reduced to a
 // constant.
-std::optional<std::string> analytic_expression(
-    const std::string& input, const std::map<std::string, double>& variables) {
+std::optional<std::string> analytic_expression(const std::string& input,
+                                               const std::map<std::string, double>& variables) {
     static const std::regex token(
         R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|[+*/()\-])");
     std::string result;
@@ -353,8 +353,7 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
     for (const auto& item : split_specs(definition.substr(left + 1, right - left - 1))) {
         std::smatch match;
         static const std::regex named_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
-        static const std::regex rgb_re(
-            R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
+        static const std::regex rgb_re(R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
         PaletteStop stop;
         if (std::regex_match(item, match, named_re)) {
             const auto value = number(match[1].str());
@@ -367,8 +366,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
             const auto red = number(match[2].str());
             const auto green = number(match[3].str());
             const auto blue = number(match[4].str());
-            if (!value || !red || !green || !blue || *red < 0 || *red > 1 ||
-                *green < 0 || *green > 1 || *blue < 0 || *blue > 1)
+            if (!value || !red || !green || !blue || *red < 0 || *red > 1 || *green < 0 ||
+                *green > 1 || *blue < 0 || *blue > 1)
                 throw std::runtime_error("invalid RGB palette stop: " + item);
             stop.value = *value;
             stop.rgb = std::array<double, 3>{*red, *green, *blue};
@@ -914,8 +913,7 @@ ParseResult parse(const std::string& source) {
             // Preserve active scalar assignments in the plotting environment.
             // Never execute arbitrary gnuplot text as Python source.
             std::smatch scalar_assignment;
-            static const std::regex scalar_pattern(
-                R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
+            static const std::regex scalar_pattern(R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
             if (std::regex_match(s, scalar_assignment, scalar_pattern)) {
                 plot_scalars[scalar_assignment[1].str()] =
                     scalar_value(scalar_assignment[2].str(), plot_scalars);
@@ -1196,8 +1194,8 @@ ParseResult parse(const std::string& source) {
             if (s == "set multiplot next") {
                 // A gridplot layout may skip cells without creating a drawable plot.
                 // The current Plot is the empty placeholder for the next panel.
-                if (!d.multiplot || !multiplot_layout || !p->series.empty() ||
-                    !p->images.empty() || !p->matrix_labels.empty())
+                if (!d.multiplot || !multiplot_layout || !p->series.empty() || !p->images.empty() ||
+                    !p->matrix_labels.empty())
                     throw std::runtime_error("set multiplot next requires an empty layout panel");
                 ++p->panel_index;
                 continue;
@@ -1623,10 +1621,9 @@ ParseResult parse(const std::string& source) {
                                 const std::string alpha = "(" + shape.str() + ")";
                                 const std::string beta = "(" + scale.str() + ")";
                                 analytic_value =
-                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" +
-                                    beta + "-math.lgamma(" + alpha + ")-" + alpha +
-                                    "*math.log(" + beta + ")) if value > 0 else " +
-                                    "(0.0 if " + alpha + " > 1.0 else " +
+                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" + beta +
+                                    "-math.lgamma(" + alpha + ")-" + alpha + "*math.log(" + beta +
+                                    ")) if value > 0 else " + "(0.0 if " + alpha + " > 1.0 else " +
                                     "(1.0/" + beta + " if " + alpha +
                                     " == 1.0 else float('inf'))))";
                             }
@@ -1800,9 +1797,8 @@ ParseResult parse(const std::string& source) {
                     // Arithmetic using expressions need per-row evaluation.
                     // Search only after 'using' (or 'u'): named sources such
                     // as $data are not column expressions.
-                    const bool using_expr =
-                        !filled && !errorbars && has_using &&
-                        spec.find('$', *using_pos) != spec.npos;
+                    const bool using_expr = !filled && !errorbars && has_using &&
+                                            spec.find('$', *using_pos) != spec.npos;
                     const auto fields = candle     ? using_fields(spec, 5)
                                       : filled     ? using_fields(spec)
                                       : using_expr ? using_fields(spec, 2)

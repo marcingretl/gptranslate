@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
                              "it.\n";
                 return 0;
             } else if (arg == "--version") {
-                std::cout << "gp-executor 0.12.0\n";
+                std::cout << "gp-executor " << GPTRANSLATE_VERSION << '\n';
                 return 0;
             } else if (!arg.empty() && arg[0] == '-') {
                 throw std::runtime_error("unknown argument: " + arg);

@@ -326,8 +326,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
               << "])\n";
         } else {
             // A skipped gridplot cell has no Plot, so use its explicit index.
-            const auto cells = static_cast<size_t>((d.multiplot ? d.rows : 1) *
-                                                   (d.multiplot ? d.cols : 1));
+            const auto cells =
+                static_cast<size_t>((d.multiplot ? d.rows : 1) * (d.multiplot ? d.cols : 1));
             if (p.panel_index >= cells)
                 throw std::runtime_error("more plots than multiplot cells");
             o << "ax = axes[" << p.panel_index << "]\n";
@@ -903,15 +903,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "for _gp_index, _gp_ax in enumerate(axes):\n";
         o << "    if _gp_index not in {";
         for (size_t j = 0; j < d.plots.size(); ++j) {
-            if (j) o << ", ";
+            if (j)
+                o << ", ";
             o << d.plots[j].panel_index;
         }
         o << "}: _gp_ax.set_visible(False)\n";
         // Reserve space for a multiplot heading when one is present.
         // tight_layout also accounts for legends attached outside the axes.
-        o << (d.multiplot_title.empty()
-                  ? "fig.tight_layout()\n"
-                  : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
+        o << (d.multiplot_title.empty() ? "fig.tight_layout()\n"
+                                        : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
     }
     if (hover_points)
         emit_point_hover(o);
