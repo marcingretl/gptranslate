@@ -18,6 +18,7 @@
 
 #pragma once
 #include <array>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -140,6 +141,8 @@ struct Plot {
     double origin_x{0.0}, origin_y{0.0};
     double size_x{1.0}, size_y{1.0};
     std::string title;
+    // Zero-based cell in a multiplot layout; skipped cells have no Plot.
+    std::size_t panel_index{0};
     Axis x, y, x2, y2;
     // Preserve gnuplot time-axis settings for backend conversion.
     bool xdata_time{false};
@@ -177,6 +180,8 @@ struct Document {
     std::string output, terminal{"pngcairo"};
     int width{800}, height{600};
     bool multiplot{false};
+    // Overall figure title from set multiplot ... title.
+    std::string multiplot_title;
     // True when panels are positioned explicitly using size/origin.
     bool positioned_multiplot{false};
     int rows{1}, cols{1};

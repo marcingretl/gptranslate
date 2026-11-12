@@ -154,7 +154,7 @@ silently ignored.
 
 - VAR inverse-roots plots are supported: `set polar` interprets inline columns as `(theta, r)` in radians, and `plot 1` draws the unit circle on Cartesian Matplotlib axes. Border/tic suppression, zero reference axes and square plot geometry are also supported more generally. Analytic polar functions and the full gnuplot polar language are not yet supported.
 - gptranslate is **not** a general-purpose gnuplot replacement. Its compatibility target is libgretl and selected gretl package output.
-- The full behavior of gretl's `gridplot` is **not yet guaranteed**. Some grid-style scripts translate, but complete support requires further work.
+- `gridplot` layouts support `set multiplot next` (including consecutive skips), overall titles via `set multiplot ... title`, and row-first positioning of nonempty panels. The full behavior of gretl's `gridplot` is **not yet guaranteed**; other grid-style options still require coverage tests.
 - Complex expressions, terminal-specific commands, layouts, and uncommon gnuplot features may be unsupported. Parser warnings/errors should be reviewed rather than ignored.
 - Some rendering choices are approximations of gnuplot semantics; visual equivalence is not guaranteed.
 - Running translated scripts requires a suitable Python environment and Matplotlib backend; interactive display is environment-dependent.

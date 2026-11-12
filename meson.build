@@ -116,6 +116,10 @@ test('logscale-y2axis', py, args: [meson.current_source_dir() / 'tests' / 'check
 # A real libgretl band plot uses arithmetic column expressions and filledcurve.
 test('filledcurve', py, args: [meson.current_source_dir() / 'tests' / 'check_filledcurve.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'filledcurve.gp', meson.current_build_dir() / 'filledcurve-test.py'])
 
+# Gridplot layouts preserve empty cell positions across reset and consecutive
+# `set multiplot next` commands, with a figure-level title.
+test('gridplot-layout', py, args: [meson.current_source_dir() / 'tests' / 'check_gridplot_layout.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'gridplot-layout.gp', meson.current_build_dir() / 'gridplot-layout.py'])
+
 # BVAR gridplot scripts use compact axis ranges and reset between panels.
 test('bvar-reset', py, args: [check, exe.full_path(), meson.current_source_dir() / 'tests' / 'bvar-reset.gp', meson.current_build_dir() / 'bvar-reset-test.py'])
 

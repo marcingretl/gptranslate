@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Improved `gridplot` compatibility with `set multiplot next` for skipped cells and
+  figure-level titles in `set multiplot layout ... title ...`. The parser preserves
+  panel indices across `reset`, while the Matplotlib backend hides unused cells
+  and reserves space for `fig.suptitle()`. Added a headless 2x3 regression test.
+
 - Fixed libgretl `freq` overlays with theoretical normal and gamma densities.
   The analytic parser now resolves previously assigned scalar parameters,
   recognizes gnuplot `pi` and `lgamma`, and preserves scalar assignments

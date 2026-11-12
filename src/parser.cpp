@@ -817,6 +817,7 @@ ParseResult parse(const std::string& source) {
     d.plots.emplace_back();
     Plot* p = &d.plots.back();
     Style default_style = Style::Lines;
+    bool multiplot_layout = false;
     bool parametric = false;
     std::optional<std::array<double, 3>> x_function, y_function;
     std::pair<double, double> trange{-5.0, 5.0};
@@ -1192,20 +1193,38 @@ ParseResult parse(const std::string& source) {
                 d.positioned_multiplot = true;
                 continue;
             }
-            if (starts(s, "set multiplot")) {
+            if (s == "set multiplot next") {
+                // A gridplot layout may skip cells without creating a drawable plot.
+                // The current Plot is the empty placeholder for the next panel.
+                if (!d.multiplot || !multiplot_layout || !p->series.empty() ||
+                    !p->images.empty() || !p->matrix_labels.empty())
+                    throw std::runtime_error("set multiplot next requires an empty layout panel");
+                ++p->panel_index;
+                continue;
+            }
+            if (s == "set multiplot" || starts(s, "set multiplot ")) {
                 d.multiplot = true;
                 std::smatch m;
                 if (std::regex_search(s, m, std::regex(R"(layout\s+(\d+)\s*,\s*(\d+))"))) {
                     d.rows = std::stoi(m[1]);
                     d.cols = std::stoi(m[2]);
+                    multiplot_layout = true;
+                    if (d.rows <= 0 || d.cols <= 0)
+                        throw std::runtime_error("multiplot layout requires positive dimensions");
                 }
+                // The multiplot title belongs to the figure, not the first axes.
+                const auto title_pos = s.find(" title ");
+                if (title_pos != s.npos)
+                    d.multiplot_title = quoted(s.substr(title_pos + 7));
                 continue;
             }
             if (s == "unset multiplot") {
                 // A trailing configuration-only panel is not a drawable plot.
                 if (d.multiplot && d.plots.size() > 1 && p->series.empty() && p->images.empty() &&
-                    p->matrix_labels.empty())
+                    p->matrix_labels.empty()) {
                     d.plots.pop_back();
+                    p = &d.plots.back();
+                }
                 continue;
             }
             if (s == "reset") {
@@ -1213,7 +1232,11 @@ ParseResult parse(const std::string& source) {
                 // already parsed panels or document-level output settings.
                 if (!p->series.empty() || !p->images.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("reset after plot data without a new panel");
+                // Reset the gnuplot settings, but preserve the grid cell selected
+                // by earlier plot commands and any set multiplot next skips.
+                const auto panel_index = p->panel_index;
                 *p = Plot{};
+                p->panel_index = panel_index;
                 continue;
             }
             // Gnuplot's default data style applies when a plot item has no `with`
@@ -1521,8 +1544,10 @@ ParseResult parse(const std::string& source) {
             }
             if (starts(s, "plot ")) {
                 if (!p->series.empty() || !p->images.empty()) {
+                    const auto panel_index = p->panel_index;
                     d.plots.emplace_back();
                     p = &d.plots.back();
+                    p->panel_index = panel_index + (d.multiplot ? 1 : 0);
                 }
                 std::string command = s.substr(5);
                 while (!command.empty() && command.back() == '\\' && i + 1 < lines.size()) {
@@ -1896,6 +1921,8 @@ ParseResult parse(const std::string& source) {
                     // panel starts with a snapshot, while plotted data remain
                     // panel-local.
                     Plot next = *p;
+                    // Advance the layout cursor after each plotted panel.
+                    ++next.panel_index;
                     next.series.clear();
                     next.images.clear();
                     next.matrix_labels.clear();
