@@ -495,12 +495,22 @@ std::string keyword_value(const std::string& s, const std::string& key) {
     std::smatch m;
     return std::regex_search(s, m, re) ? unquote(m[1].str()) : "";
 }
+// Return the start of the column specification for 'using' or its 'u' alias.
+std::optional<size_t> using_offset(const std::string& spec) {
+    const auto pos = spec.find(" using ");
+    if (pos != spec.npos)
+        return pos + 7;
+    const auto short_pos = spec.find(" u ");
+    if (short_pos != spec.npos)
+        return short_pos + 3;
+    return std::nullopt;
+}
 int using_col(const std::string& spec, int default_col, bool first) {
-    auto pos = spec.find(" using ");
-    if (pos == spec.npos) {
+    const auto pos = using_offset(spec);
+    if (!pos) {
         return default_col;
     }
-    auto t = trim(spec.substr(pos + 7));
+    auto t = trim(spec.substr(*pos));
     std::smatch m;
     std::regex re(R"(^(\d+)(?::(\d+))?)");
     if (!std::regex_search(t, m, re)) {
@@ -606,10 +616,10 @@ class ColumnExpression {
 };
 // Split using fields without breaking expressions inside parentheses.
 std::vector<std::string> using_fields(const std::string& spec, size_t expected = 3) {
-    const auto start = spec.find(" using ");
-    if (start == std::string::npos)
+    const auto start = using_offset(spec);
+    if (!start)
         throw std::runtime_error("missing using specification");
-    const std::string tail = spec.substr(start + 7);
+    const std::string tail = spec.substr(*start);
     std::vector<std::string> fields;
     int depth = 0;
     size_t begin = 0;
@@ -1621,7 +1631,7 @@ ParseResult parse(const std::string& source) {
                         }
                         if (spec.find(" matrix") != spec.npos) {
                             const auto style = keyword_value(spec, "with");
-                            if (style == "image" && spec.find(" using ") == spec.npos) {
+                            if (style == "image" && !using_offset(spec)) {
                                 p->images.push_back(parse_matrix(*named_rows));
                             } else if (style == "labels") {
                                 p->matrix_labels.push_back(parse_matrix_labels(spec, *named_rows));
@@ -1748,7 +1758,8 @@ ParseResult parse(const std::string& source) {
                     const bool candle = ser.style == Style::Candlesticks;
                     const bool filled = ser.style == Style::FilledCurve;
                     const bool errorbars = ser.style == Style::ErrorBars;
-                    const bool has_using = spec.find(" using ") != spec.npos;
+                    const auto using_pos = using_offset(spec);
+                    const bool has_using = using_pos.has_value();
                     // Error bars accept x:y:dy or x:y:ylow:yhigh, including
                     // explicit column expressions. Without `using`, the data
                     // row length determines whether a symmetric or asymmetric
@@ -1762,8 +1773,11 @@ ParseResult parse(const std::string& source) {
                         }
                     }
                     // Arithmetic using expressions need per-row evaluation.
+                    // Search only after 'using' (or 'u'): named sources such
+                    // as $data are not column expressions.
                     const bool using_expr =
-                        !filled && !errorbars && has_using && spec.find('$') != spec.npos;
+                        !filled && !errorbars && has_using &&
+                        spec.find('$', *using_pos) != spec.npos;
                     const auto fields = candle     ? using_fields(spec, 5)
                                       : filled     ? using_fields(spec)
                                       : using_expr ? using_fields(spec, 2)

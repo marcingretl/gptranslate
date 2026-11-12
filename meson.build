@@ -138,6 +138,10 @@ test('svar-fevd', py, args: [meson.current_source_dir() / 'tests' / 'check_fevd.
 # SVAR impulse response plots use abbreviated line style and inline data.
 test('svar-irf', py, args: [meson.current_source_dir() / 'tests' / 'check_svar_irf.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'svar-irf.gp'])
 
+# SVAR historical decomposition mixes named data, rowstacked histograms and
+# a one-column 'using 1' line with implicit observation-number x coordinates.
+test('svar-hd', py, args: [meson.current_source_dir() / 'tests' / 'check_svar_hd.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'svar-hd.gp', meson.current_build_dir() / 'svar-hd-test.py'])
+
 # VAR inverse roots: polar theta/r data, unit circle, axes, square aspect and tics.
 # Run headlessly without emitting plt.show(), including the tic reset checks.
 test('inverse-roots', py, args: [meson.current_source_dir() / 'tests' / 'check_inverse_roots.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'inverse-roots.gp', meson.current_build_dir() / 'inverse-roots-test.py'])
