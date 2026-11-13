@@ -321,6 +321,49 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
     }
     return matrix;
 }
+// Read a named data block as explicit XYZ points selected by 1-based columns.
+// Blank rows delimit Gnuplot scans; dgrid3d treats all scans as scattered data.
+std::vector<std::array<double, 3>> parse_xyz_points(
+    const std::vector<std::string>& rows, const std::array<int, 3>& columns) {
+    std::vector<std::array<double, 3>> points;
+    const int max_column = *std::max_element(columns.begin(), columns.end());
+    for (const auto& raw : rows) {
+        const auto line = trim(raw);
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream input(line);
+        std::vector<std::string> cells;
+        std::string cell;
+        while (input >> cell) {
+            if (!cell.empty() && cell[0] == '#')
+                break;
+            cells.push_back(cell);
+        }
+        if (static_cast<int>(cells.size()) < max_column)
+            throw std::runtime_error("3D data row has too few columns: " + line);
+        std::array<double, 3> point{};
+        bool missing = false;
+        for (size_t k = 0; k < columns.size(); ++k) {
+            const auto value = number(cells[columns[k] - 1]);
+            if (!value) {
+                // Gnuplot omits points with undefined numeric coordinates.
+                if (cells[columns[k] - 1] == "NaN" || cells[columns[k] - 1] == "nan" ||
+                    cells[columns[k] - 1] == "NAN" || cells[columns[k] - 1] == "?" ||
+                    cells[columns[k] - 1] == "*") {
+                    missing = true;
+                    break;
+                }
+                throw std::runtime_error("invalid 3D data value: " + cells[columns[k] - 1]);
+            }
+            point[k] = *value;
+        }
+        if (!missing)
+            points.push_back(point);
+    }
+    if (points.size() < 3)
+        throw std::runtime_error("3D XYZ surface requires at least three points");
+    return points;
+}
 // Parse matrix labels with gnuplot pseudo-columns, sprintf formatting and
 // a conditional RGB text color. Unsupported expressions remain errors.
 // Some libgretl scripts also place plain numeric annotations with
@@ -970,6 +1013,8 @@ ParseResult parse(const std::string& source) {
     bool contour_surface = true;
     // `set pm3d at s` enables filled 3D surfaces, not flat contour maps.
     bool pm3d_surface = false;
+    // The gridding directive applies to XYZ sources, not matrix sources.
+    std::optional<std::array<int, 3>> dgrid3d;
     int contour_level_count = 0;
     int contour_first_linetype = 0;
     std::vector<double> contour_levels;
@@ -1430,6 +1475,7 @@ ParseResult parse(const std::string& source) {
                 contour_view_map = false;
                 contour_surface = true;
                 pm3d_surface = false;
+                dgrid3d.reset();
                 contour_level_count = 0;
                 contour_first_linetype = 0;
                 contour_levels.clear();
@@ -1688,6 +1734,7 @@ ParseResult parse(const std::string& source) {
             if (starts(s, "set dgrid3d ")) {
                 // Named matrix blocks already provide a rectangular grid.
                 // Validate this directive, but do not regrid matrix values.
+                // For explicit XYZ points, retain the requested gridding parameters.
                 static const std::regex dgrid_re(
                     R"(^set dgrid3d\s+([0-9]+)\s*,\s*([0-9]+)\s+qnorm\s+([0-9]+)\s*$)");
                 std::smatch match;
@@ -1695,6 +1742,13 @@ ParseResult parse(const std::string& source) {
                     std::stoi(match[1].str()) < 2 || std::stoi(match[2].str()) < 2 ||
                     std::stoi(match[3].str()) < 1)
                     throw std::runtime_error("unsupported dgrid3d directive: " + s);
+                dgrid3d = std::array<int, 3>{std::stoi(match[1].str()),
+                                            std::stoi(match[2].str()),
+                                            std::stoi(match[3].str())};
+                continue;
+            }
+            if (s == "unset dgrid3d") {
+                dgrid3d.reset();
                 continue;
             }
             // `isosamples` controls function sampling in gnuplot. An explicit
@@ -1747,7 +1801,30 @@ ParseResult parse(const std::string& source) {
                 // existing contour-map interpretation of `splot`.
                 static const std::regex surface_plot_re(
                     R"(^splot\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s+matrix\s+with\s+pm3d\s*$)");
+                // Named XYZ sources select three 1-based datafile columns.
+                // `palette` is the default pm3d coloring, so it needs no
+                // additional rendering option after validating the syntax.
+                static const std::regex xyz_plot_re(
+                    R"(^splot\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s+using\s+([1-9][0-9]*)\s*:\s*([1-9][0-9]*)\s*:\s*([1-9][0-9]*)\s+with\s+pm3d(?:\s+palette)?\s*$)");
                 std::smatch surface_match;
+                if (std::regex_match(s, surface_match, xyz_plot_re)) {
+                    if (!pm3d_surface || contour_view_map)
+                        throw std::runtime_error("unsupported 3D splot: " + s);
+                    if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
+                        !p->matrix_labels.empty())
+                        throw std::runtime_error("mixed 2D and 3D plot is unsupported");
+                    const auto block = d.data_blocks.find(surface_match[1].str());
+                    if (block == d.data_blocks.end())
+                        throw std::runtime_error("unknown 3D data block: " + surface_match[1].str());
+                    SurfaceGrid surface;
+                    const std::array<int, 3> columns{std::stoi(surface_match[2].str()),
+                                                     std::stoi(surface_match[3].str()),
+                                                     std::stoi(surface_match[4].str())};
+                    surface.xyz_points = parse_xyz_points(block->second, columns);
+                    surface.dgrid3d = dgrid3d;
+                    p->surfaces.push_back(std::move(surface));
+                    continue;
+                }
                 if (std::regex_match(s, surface_match, surface_plot_re)) {
                     if (!pm3d_surface || contour_view_map)
                         throw std::runtime_error("unsupported 3D splot: " + s);

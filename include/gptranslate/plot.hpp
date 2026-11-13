@@ -111,6 +111,10 @@ struct ImageMatrix {
 // A matrix-valued pm3d surface; unlike flat contours, it requires a 3D axis.
 struct SurfaceGrid {
     ImageMatrix matrix;
+    // XYZ data use actual coordinates rather than matrix pseudo-columns.
+    std::vector<std::array<double, 3>> xyz_points;
+    // Optional gnuplot dgrid3d parameters: x size, y size and qnorm power.
+    std::optional<std::array<int, 3>> dgrid3d;
 };
 struct ContourGrid {
     ImageMatrix matrix;

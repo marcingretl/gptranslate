@@ -226,3 +226,6 @@ test('heatmap-multiline-palette', py, args: [meson.current_source_dir() / 'tests
 # A matrix pm3d splot must create a true 3D surface and preserve the z label.
 # Flat contour maps continue using the independent 2D contour code path.
 test('heatmap-surface-3d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_surface_3d.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-surface-3d.gp', meson.current_build_dir() / 'heatmap-surface-3d.py'])
+
+# Explicit XYZ pm3d points use Gnuplot qnorm dgrid3d before plotting.
+test('heatmap-surface-xyz', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_surface_xyz.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-surface-xyz.gp', meson.current_build_dir() / 'heatmap-surface-xyz.py'])

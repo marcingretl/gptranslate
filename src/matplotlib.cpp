@@ -411,14 +411,57 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         }
         if (!p.surfaces.empty()) {
             // Grid indices become Gnuplot matrix coordinates; color encodes Z.
+            // Explicit XYZ sources instead retain their original coordinates.
             // This branch deliberately avoids all 2D-specific axis formatting.
             for (const auto& surface : p.surfaces) {
-                o << "_gp_surface_z = np.asarray(" << matrix_numbers(surface.matrix)
-                  << ", dtype=float)\n";
-                o << "_gp_surface_y, _gp_surface_x = np.indices(_gp_surface_z.shape)\n";
-                o << "_gp_surface = ax.plot_surface(_gp_surface_x, _gp_surface_y, "
-                     "_gp_surface_z, linewidth=0, antialiased=True, cmap="
-                  << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                if (surface.xyz_points.empty()) {
+                    // Matrix pseudo-columns are coordinates of the rectangular grid.
+                    o << "_gp_surface_z = np.asarray(" << matrix_numbers(surface.matrix)
+                      << ", dtype=float)\n";
+                    o << "_gp_surface_y, _gp_surface_x = np.indices(_gp_surface_z.shape)\n";
+                } else {
+                    // Named non-matrix data use their explicit X, Y and Z values.
+                    o << "_gp_xyz = np.asarray([";
+                    o << std::setprecision(17);
+                    for (size_t k = 0; k < surface.xyz_points.size(); ++k) {
+                        if (k)
+                            o << ", ";
+                        const auto& xyz = surface.xyz_points[k];
+                        o << "[" << xyz[0] << ", " << xyz[1] << ", " << xyz[2] << "]";
+                    }
+                    o << "], dtype=float)\n";
+                    if (surface.dgrid3d) {
+                        const auto [nx, ny, qnorm] = *surface.dgrid3d;
+                        // Recreate Gnuplot's qnorm inverse-distance weighted
+                        // dgrid3d surface; exact hits use the source point.
+                        o << "_gp_surface_x, _gp_surface_y = np.meshgrid("
+                             "np.linspace(_gp_xyz[:,0].min(), _gp_xyz[:,0].max(), "
+                          << nx << "), np.linspace(_gp_xyz[:,1].min(), "
+                             "_gp_xyz[:,1].max(), " << ny << "))\n";
+                        o << "_gp_dx = np.abs(_gp_surface_x[...,None] - _gp_xyz[:,0])\n";
+                        o << "_gp_dy = np.abs(_gp_surface_y[...,None] - _gp_xyz[:,1])\n";
+                        o << "_gp_dist = _gp_dx**" << qnorm << " + _gp_dy**" << qnorm << "\n";
+                        o << "_gp_weights = np.divide(1., _gp_dist, "
+                             "out=np.zeros_like(_gp_dist), where=_gp_dist>0)\n";
+                        o << "_gp_den = _gp_weights.sum(axis=2)\n";
+                        o << "_gp_surface_z = np.divide("
+                             "np.sum(_gp_weights * _gp_xyz[:,2], axis=2), _gp_den, "
+                             "out=np.full(_gp_den.shape, np.nan), where=_gp_den>0)\n";
+                        o << "_gp_exact = (_gp_dist == 0)\n";
+                        o << "_gp_surface_z = np.where(_gp_exact.any(axis=2), "
+                             "_gp_xyz[:,2][np.argmax(_gp_exact, axis=2)], _gp_surface_z)\n";
+                    }
+                }
+                if (!surface.xyz_points.empty() && !surface.dgrid3d) {
+                    // Un-gridded XYZ points are approximated by triangular faces.
+                    o << "_gp_surface = ax.plot_trisurf(_gp_xyz[:,0], _gp_xyz[:,1], "
+                         "_gp_xyz[:,2], linewidth=0, antialiased=True, cmap="
+                      << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                } else {
+                    o << "_gp_surface = ax.plot_surface(_gp_surface_x, _gp_surface_y, "
+                         "_gp_surface_z, linewidth=0, antialiased=True, cmap="
+                      << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                }
                 if (p.colors.min || p.colors.max) {
                     o << ", norm=Normalize(vmin="
                       << (p.colors.min ? std::to_string(*p.colors.min) : "None")
