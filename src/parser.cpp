@@ -37,8 +37,8 @@ namespace {
 // the constant pi, and arithmetic only.
 // Invalid expressions are rejected instead of being silently reduced to a
 // constant.
-std::optional<std::string> analytic_expression(const std::string& input,
-                                               const std::map<std::string, double>& variables) {
+std::optional<std::string> analytic_expression(
+    const std::string& input, const std::map<std::string, double>& variables) {
     static const std::regex token(
         R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|[+*/()\-])");
     std::string result;
@@ -294,6 +294,12 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
         std::vector<double> values;
         std::string cell;
         while (stream >> cell) {
+            // NaN marks an absent matrix cell (e.g. the unused half of a
+            // triangular correlation heatmap). Preserve it as missing data.
+            if (cell == "NaN" || cell == "nan" || cell == "NAN") {
+                values.push_back(std::numeric_limits<double>::quiet_NaN());
+                continue;
+            }
             auto value = number(cell);
             if (!value) {
                 throw std::runtime_error("invalid numeric matrix value: " + cell);
@@ -321,7 +327,8 @@ MatrixLabels parse_matrix_labels(const std::string& spec, const std::vector<std:
     // The four using expressions correspond to x, y, label and text color.
     // Whitespace is accepted around operators, without matching a plot name.
     static const std::regex expression(
-        R"GP(^\$[A-Za-z_][A-Za-z0-9_]*\s+matrix\s+using\s+1\s*:\s*2\s*:\s*\(\s*sprintf\s*\(\s*([\"'])(%[^\"']+)\1\s*,\s*\$3\s*\)\s*\)\s*:\s*\(\s*\$3\s*(<|<=|>|>=)\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\?\s*(0x[0-9a-fA-F]{6})\s*:\s*(0x[0-9a-fA-F]{6})\s*\)\s+with\s+labels\s+tc\s+rgb\s+var\s*$)GP");
+        // Also accept libgretl's NaN guard: $3!=$3 ? "" : sprintf(...).
+        R"GP(^\$[A-Za-z_][A-Za-z0-9_]*\s+matrix\s+using\s+1\s*:\s*2\s*:\s*\(\s*(?:\$3\s*!=\s*\$3\s*\?\s*(?:""|'')\s*:\s*)?sprintf\s*\(\s*([\"'])(%[^\"']+)\1\s*,\s*\$3\s*\)\s*\)\s*:\s*\(\s*\$3\s*(<|<=|>|>=)\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\?\s*(0x[0-9a-fA-F]{6})\s*:\s*(0x[0-9a-fA-F]{6})\s*\)\s+with\s+labels\s+tc\s+rgb\s+var\s*$)GP");
     std::smatch match;
     if (!std::regex_match(spec, match, expression))
         throw std::runtime_error("unsupported matrix plot expression: " + spec);
@@ -353,7 +360,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
     for (const auto& item : split_specs(definition.substr(left + 1, right - left - 1))) {
         std::smatch match;
         static const std::regex named_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
-        static const std::regex rgb_re(R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
+        static const std::regex rgb_re(
+            R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
         PaletteStop stop;
         if (std::regex_match(item, match, named_re)) {
             const auto value = number(match[1].str());
@@ -366,8 +374,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
             const auto red = number(match[2].str());
             const auto green = number(match[3].str());
             const auto blue = number(match[4].str());
-            if (!value || !red || !green || !blue || *red < 0 || *red > 1 || *green < 0 ||
-                *green > 1 || *blue < 0 || *blue > 1)
+            if (!value || !red || !green || !blue || *red < 0 || *red > 1 ||
+                *green < 0 || *green > 1 || *blue < 0 || *blue > 1)
                 throw std::runtime_error("invalid RGB palette stop: " + item);
             stop.value = *value;
             stop.rgb = std::array<double, 3>{*red, *green, *blue};
@@ -815,7 +823,8 @@ ParseResult parse(const std::string& source) {
     auto& d = result.document;
     d.plots.emplace_back();
     Plot* p = &d.plots.back();
-    Style default_style = Style::Lines;
+    // Gnuplot defaults to points for data and lines for functions.
+    Style default_style = Style::Points;
     bool multiplot_layout = false;
     bool parametric = false;
     std::optional<std::array<double, 3>> x_function, y_function;
@@ -913,7 +922,8 @@ ParseResult parse(const std::string& source) {
             // Preserve active scalar assignments in the plotting environment.
             // Never execute arbitrary gnuplot text as Python source.
             std::smatch scalar_assignment;
-            static const std::regex scalar_pattern(R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
+            static const std::regex scalar_pattern(
+                R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
             if (std::regex_match(s, scalar_assignment, scalar_pattern)) {
                 plot_scalars[scalar_assignment[1].str()] =
                     scalar_value(scalar_assignment[2].str(), plot_scalars);
@@ -954,6 +964,30 @@ ParseResult parse(const std::string& source) {
             }
             if (s == "set tics mirror") {
                 p->mirror_tics = true;
+                continue;
+            }
+            // Gretl's scatter-panel offsets are fractions of the graph box,
+            // ordered left, right, top and bottom.
+            if (starts(s, "set offsets ")) {
+                const auto parts = split_specs(trim(s.substr(std::string("set offsets ").size())));
+                if (parts.size() != 4)
+                    throw std::runtime_error("unsupported offsets expression: " + s);
+                std::array<double, 4> offsets{};
+                for (size_t k = 0; k < offsets.size(); ++k) {
+                    if (!starts(parts[k], "graph "))
+                        throw std::runtime_error("unsupported offsets units: " + parts[k]);
+                    auto value = number(parts[k].substr(6));
+                    if (!value || *value < 0 || *value >= 1)
+                        throw std::runtime_error("invalid graph offsets: " + parts[k]);
+                    offsets[k] = *value;
+                }
+                if (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1)
+                    throw std::runtime_error("graph offsets exceed available plot area");
+                p->graph_offsets = offsets;
+                continue;
+            }
+            if (s == "unset offsets" || s == "set nooffsets") {
+                p->graph_offsets.reset();
                 continue;
             }
             if (s == "set xzeroaxis") {
@@ -1194,8 +1228,8 @@ ParseResult parse(const std::string& source) {
             if (s == "set multiplot next") {
                 // A gridplot layout may skip cells without creating a drawable plot.
                 // The current Plot is the empty placeholder for the next panel.
-                if (!d.multiplot || !multiplot_layout || !p->series.empty() || !p->images.empty() ||
-                    !p->matrix_labels.empty())
+                if (!d.multiplot || !multiplot_layout || !p->series.empty() ||
+                    !p->images.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("set multiplot next requires an empty layout panel");
                 ++p->panel_index;
                 continue;
@@ -1621,9 +1655,10 @@ ParseResult parse(const std::string& source) {
                                 const std::string alpha = "(" + shape.str() + ")";
                                 const std::string beta = "(" + scale.str() + ")";
                                 analytic_value =
-                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" + beta +
-                                    "-math.lgamma(" + alpha + ")-" + alpha + "*math.log(" + beta +
-                                    ")) if value > 0 else " + "(0.0 if " + alpha + " > 1.0 else " +
+                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" +
+                                    beta + "-math.lgamma(" + alpha + ")-" + alpha +
+                                    "*math.log(" + beta + ")) if value > 0 else " +
+                                    "(0.0 if " + alpha + " > 1.0 else " +
                                     "(1.0/" + beta + " if " + alpha +
                                     " == 1.0 else float('inf'))))";
                             }
@@ -1682,14 +1717,15 @@ ParseResult parse(const std::string& source) {
                     // fallback.
                     ser.explicit_color = !ser.color.empty();
                     // Gnuplot accepts both the long 'with' and abbreviated 'w' spelling.
-                    // Missing style means lines; unsupported styles must not silently
-                    // become points, since that would change the meaning of the plot.
+                    // Unqualified data plots use set style data (points by default),
+                    // while numeric and analytic functions default to lines.
                     auto style = keyword_value(spec, "with");
                     if (style.empty()) {
                         style = keyword_value(spec, "w");
                     }
                     if (style.empty()) {
-                        ser.style = default_style;
+                        ser.style = (constant_value || analytic_value) ? Style::Lines
+                                                                       : default_style;
                     } else if (style == "lines" || style == "l") {
                         ser.style = Style::Lines;
                     } else if (style == "hist" || style == "histogram" || style == "histograms") {
@@ -1797,8 +1833,9 @@ ParseResult parse(const std::string& source) {
                     // Arithmetic using expressions need per-row evaluation.
                     // Search only after 'using' (or 'u'): named sources such
                     // as $data are not column expressions.
-                    const bool using_expr = !filled && !errorbars && has_using &&
-                                            spec.find('$', *using_pos) != spec.npos;
+                    const bool using_expr =
+                        !filled && !errorbars && has_using &&
+                        spec.find('$', *using_pos) != spec.npos;
                     const auto fields = candle     ? using_fields(spec, 5)
                                       : filled     ? using_fields(spec)
                                       : using_expr ? using_fields(spec, 2)

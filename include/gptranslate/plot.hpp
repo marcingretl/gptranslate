@@ -131,6 +131,8 @@ struct Plot {
     };
     std::vector<Label> labels;
     bool xtics_disabled{false}, ytics_disabled{false};
+    // Gnuplot offsets in graph-relative units: left, right, top, bottom.
+    std::optional<std::array<double, 4>> graph_offsets;
     // Polar data columns are angle (radians) and radius, not Cartesian x/y.
     bool polar{false};
     // `set size square` fixes the axes geometry, unlike a multiplot panel size.

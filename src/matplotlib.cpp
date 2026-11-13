@@ -81,7 +81,11 @@ std::string matrix_numbers(const ImageMatrix& image) {
             if (c) {
                 o << ',';
             }
-            o << image.rows[r][c];
+            // Python requires an explicit representation for nonfinite cells.
+            if (std::isnan(image.rows[r][c]))
+                o << "float('nan')";
+            else
+                o << image.rows[r][c];
         }
         o << ']';
     }
@@ -326,8 +330,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
               << "])\n";
         } else {
             // A skipped gridplot cell has no Plot, so use its explicit index.
-            const auto cells =
-                static_cast<size_t>((d.multiplot ? d.rows : 1) * (d.multiplot ? d.cols : 1));
+            const auto cells = static_cast<size_t>((d.multiplot ? d.rows : 1) *
+                                                   (d.multiplot ? d.cols : 1));
             if (p.panel_index >= cells)
                 throw std::runtime_error("more plots than multiplot cells");
             o << "ax = axes[" << p.panel_index << "]\n";
@@ -383,6 +387,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         for (const auto& labels : p.matrix_labels) {
             o << "for row_index, values in enumerate(" << matrix_numbers(labels.matrix) << "):\n";
             o << "    for column_index, value in enumerate(values):\n";
+            // Suppress missing-cell labels in triangular correlation plots.
+            o << "        if value != value:\n";
+            o << "            continue\n";
             o << "        color = '#" << labels.below_color << "' if value " << labels.comparison
               << " " << std::setprecision(17) << labels.threshold << " else '#"
               << labels.otherwise_color << "'\n";
@@ -743,6 +750,27 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "ax2.set_yscale('log', base=" << p.y2.log_base << ")\n";
             }
         }
+        if (p.graph_offsets) {
+            // Convert graph-relative fractions to data-coordinate extensions.
+            // Unlike symmetric ax.margins(), this preserves independent sides.
+            const auto& offsets = *p.graph_offsets;
+            o << "_gp_x0, _gp_x1 = ax.dataLim.intervalx\n";
+            o << "_gp_y0, _gp_y1 = ax.dataLim.intervaly\n";
+            if (!p.x.min && !p.x.max && !p.x.log) {
+                o << "if _gp_x1 > _gp_x0:\n";
+                o << "    _gp_span = (_gp_x1 - _gp_x0) / "
+                  << (1.0 - offsets[0] - offsets[1]) << "\n";
+                o << "    ax.set_xlim(_gp_x0 - " << offsets[0]
+                  << " * _gp_span, _gp_x1 + " << offsets[1] << " * _gp_span)\n";
+            }
+            if (!p.y.min && !p.y.max && !p.y.log) {
+                o << "if _gp_y1 > _gp_y0:\n";
+                o << "    _gp_span = (_gp_y1 - _gp_y0) / "
+                  << (1.0 - offsets[2] - offsets[3]) << "\n";
+                o << "    ax.set_ylim(_gp_y0 - " << offsets[3]
+                  << " * _gp_span, _gp_y1 + " << offsets[2] << " * _gp_span)\n";
+            }
+        }
         if (p.xzeroaxis) {
             // A zero reference axis must not enlarge the data-driven y range.
             // Explicit gnuplot yrange bounds have already been applied above.
@@ -903,15 +931,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "for _gp_index, _gp_ax in enumerate(axes):\n";
         o << "    if _gp_index not in {";
         for (size_t j = 0; j < d.plots.size(); ++j) {
-            if (j)
-                o << ", ";
+            if (j) o << ", ";
             o << d.plots[j].panel_index;
         }
         o << "}: _gp_ax.set_visible(False)\n";
         // Reserve space for a multiplot heading when one is present.
         // tight_layout also accounts for legends attached outside the axes.
-        o << (d.multiplot_title.empty() ? "fig.tight_layout()\n"
-                                        : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
+        o << (d.multiplot_title.empty()
+                  ? "fig.tight_layout()\n"
+                  : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
     }
     if (hover_points)
         emit_point_hover(o);

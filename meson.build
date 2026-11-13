@@ -193,3 +193,7 @@ test('cusum-analytic-domain', py, args: [meson.current_source_dir() / 'tests' / 
 # The gamma case must evaluate in log space for large shape parameters.
 test('freq-normal-density', py, args: [meson.current_source_dir() / 'tests' / 'check_freq_density.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'freq-normal.gp', meson.current_build_dir() / 'freq-normal.py', 'normal'])
 test('freq-gamma-density', py, args: [meson.current_source_dir() / 'tests' / 'check_freq_density.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'freq-gamma.gp', meson.current_build_dir() / 'freq-gamma.py', 'gamma'])
+
+# Real gretl4py gallery examples: scatter graph offsets and NaN heatmap cells.
+test('gallery-d12-scatters', py, args: [meson.current_source_dir() / 'tests' / 'check_gallery_d12.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'gallery-d12-scatters.gp', meson.current_build_dir() / 'gallery-d12-scatters.py'])
+test('gallery-d18-corr-triangle', py, args: [meson.current_source_dir() / 'tests' / 'check_gallery_d18.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'gallery-d18-corr-triangle.gp', meson.current_build_dir() / 'gallery-d18-corr-triangle.py'])
