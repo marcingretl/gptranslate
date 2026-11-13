@@ -463,6 +463,13 @@ void parse_tics(Tics& tics, const std::string& spec) {
             }
         }
     }
+    // A font modifier such as font ',7' specifies tick-label size.
+    static const std::regex font_re(R"GP((?:^|\s)font\s+(['"])([^'",]*),([0-9]+(?:\.[0-9]+)?)\1(?=\s|$))GP");
+    if (std::regex_search(spec, match, font_re)) {
+        tics.font_size = std::stod(match[3].str());
+        if (*tics.font_size <= 0)
+            throw std::runtime_error("invalid tic font size");
+    }
     if (std::regex_search(spec, std::regex(R"((?:^|\s)out(?:\s|$))")))
         tics.outward = true;
     // A numeric tic specification is incr or start,incr[,end].
@@ -484,6 +491,7 @@ void parse_tics(Tics& tics, const std::string& spec) {
         spec, std::regex(R"((?:^|\s)rotate\s+by\s+-?[0-9]+(?:\.[0-9]+)?(?:\s+right)?)"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)format\s+(['"])(.*?)\1)"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)scale\s+[^\s]+)"), " ");
+    rest = std::regex_replace(rest, font_re, " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)out(?:\s|$))"), " ");
     // Mirroring is a per-axis property, not an unsupported tic modifier.
     if (std::regex_search(spec, std::regex(R"((?:^|\s)nomirror(?:\s|$))")))
@@ -497,6 +505,12 @@ void parse_tics(Tics& tics, const std::string& spec) {
         throw std::runtime_error("unsupported tic modifier: " + trim(rest));
     }
 }
+// Named gnuplot line styles are distinct from linetype palette entries.
+struct NamedLineStyle {
+    std::string color;
+    int line_type{1};
+    double width{1.5};
+};
 std::string keyword_value(const std::string& s, const std::string& key) {
     std::regex re("(?:^|\\s)" + key + "\\s+((?:\\\"[^\\\"]*\\\")|(?:'[^']*')|(?:[^\\s,]+))");
     std::smatch m;
@@ -887,6 +901,7 @@ ParseResult parse(const std::string& source) {
             break;
         }
     }
+    std::map<int, NamedLineStyle> named_line_styles;
     for (size_t i = 0; i < lines.size(); ++i) {
         auto s = trim(lines[i]);
         if (s.empty() || s[0] == '#')
@@ -929,6 +944,30 @@ ParseResult parse(const std::string& source) {
                     scalar_value(scalar_assignment[2].str(), plot_scalars);
                 continue;
             }
+            // Set the default size for subsequent point-bearing plot items.
+            if (starts(s, "set pointsize ")) {
+                const auto size = number(trim(s.substr(14)));
+                if (!size || !std::isfinite(*size) || *size <= 0)
+                    throw std::runtime_error("invalid pointsize: " + s);
+                p->point_size = *size;
+                continue;
+            }
+            // Line styles (ls N) have a separate namespace from linetypes.
+            if (starts(s, "set style line ")) {
+                static const std::regex named_style_re(
+                    R"GP(^set style line\s+([1-9][0-9]*)\s+lc\s+rgb\s+(['"])(.*?)\2\s+lt\s+(-?[0-9]+)\s+lw\s+([0-9]+(?:\.[0-9]+)?)\s*$)GP");
+                std::smatch m;
+                if (!std::regex_match(s, m, named_style_re))
+                    throw std::runtime_error("unsupported style line definition: " + s);
+                NamedLineStyle style;
+                style.color = m[3].str();
+                style.line_type = std::stoi(m[4].str());
+                style.width = std::stod(m[5].str());
+                if (style.width <= 0)
+                    throw std::runtime_error("invalid style line width: " + s);
+                named_line_styles[std::stoi(m[1].str())] = std::move(style);
+                continue;
+            }
             // Linetype definitions are global and may precede the plot command.
             if (starts(s, "set linetype ")) {
                 std::smatch m;
@@ -966,28 +1005,34 @@ ParseResult parse(const std::string& source) {
                 p->mirror_tics = true;
                 continue;
             }
-            // Gretl's scatter-panel offsets are fractions of the graph box,
-            // ordered left, right, top and bottom.
+            // Graph offsets are fractions of the plot range; bare numeric
+            // offsets are additive data units. Preserve the distinction.
             if (starts(s, "set offsets ")) {
                 const auto parts = split_specs(trim(s.substr(std::string("set offsets ").size())));
                 if (parts.size() != 4)
                     throw std::runtime_error("unsupported offsets expression: " + s);
                 std::array<double, 4> offsets{};
+                const bool graph_units = starts(parts[0], "graph ");
                 for (size_t k = 0; k < offsets.size(); ++k) {
-                    if (!starts(parts[k], "graph "))
-                        throw std::runtime_error("unsupported offsets units: " + parts[k]);
-                    auto value = number(parts[k].substr(6));
-                    if (!value || *value < 0 || *value >= 1)
+                    if (starts(parts[k], "graph ") != graph_units)
+                        throw std::runtime_error("mixed offsets units are not supported: " + s);
+                    const auto value = number(graph_units ? parts[k].substr(6) : parts[k]);
+                    if (!value || !std::isfinite(*value))
+                        throw std::runtime_error("invalid offsets: " + parts[k]);
+                    if (graph_units && (*value < 0 || *value >= 1))
                         throw std::runtime_error("invalid graph offsets: " + parts[k]);
                     offsets[k] = *value;
                 }
-                if (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1)
+                if (graph_units &&
+                    (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1))
                     throw std::runtime_error("graph offsets exceed available plot area");
-                p->graph_offsets = offsets;
+                p->graph_offsets = graph_units ? std::optional(offsets) : std::nullopt;
+                p->axis_offsets = graph_units ? std::nullopt : std::optional(offsets);
                 continue;
             }
             if (s == "unset offsets" || s == "set nooffsets") {
                 p->graph_offsets.reset();
+                p->axis_offsets.reset();
                 continue;
             }
             if (s == "set xzeroaxis") {
@@ -1072,8 +1117,24 @@ ParseResult parse(const std::string& source) {
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)\s+center(?:\s+(?:front|back))*\s*$)GP");
+                // PairPlot marks highlighted observations with numbered, empty
+                // point labels using explicit size, type and RGB color.
+                static const std::regex numbered_point_label_re(
+                    R"GP(^set label\s+[0-9]+\s+(['"])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+ps\s+([^\s]+)\s+pt\s+([0-9]+)\s+lt\s+(-?[0-9]+)\s+lc\s+(['"])(.*?)\8\s+lw\s+([^\s]+)(?:\s+(?:front|back))?\s*$)GP");
                 std::smatch match;
-                if (std::regex_match(s, match, graph_label_re)) {
+                if (std::regex_match(s, match, numbered_point_label_re)) {
+                    const auto x = number(match[3].str()), y = number(match[4].str());
+                    const auto ps = number(match[5].str()), lw = number(match[10].str());
+                    if (!x || !y || !ps || !lw || *ps <= 0 || *lw <= 0)
+                        throw std::runtime_error("invalid point label: " + s);
+                    Plot::Label label{match[2].str(), *x, *y, false, false};
+                    label.point_marker = true;
+                    label.point_size = *ps;
+                    label.point_type = std::stoi(match[6].str());
+                    label.point_line_type = std::stoi(match[7].str());
+                    label.point_color = match[9].str();
+                    p->labels.push_back(std::move(label));
+                } else if (std::regex_match(s, match, graph_label_re)) {
                     const auto x = number(match[3].str()), y = number(match[4].str());
                     if (!x || !y)
                         throw std::runtime_error("invalid label coordinates: " + s);
@@ -1269,6 +1330,7 @@ ParseResult parse(const std::string& source) {
                 const auto panel_index = p->panel_index;
                 *p = Plot{};
                 p->panel_index = panel_index;
+                named_line_styles.clear();
                 continue;
             }
             // Gnuplot's default data style applies when a plot item has no `with`
@@ -1704,6 +1766,7 @@ ParseResult parse(const std::string& source) {
                     // single gnuplot plot command may mix lines, points and analytic
                     // functions.
                     Series ser;
+                    ser.point_size = p->point_size;
                     ser.title = keyword_value(spec, "title");
                     if (ser.title.empty())
                         ser.title = keyword_value(spec, "t");
@@ -1785,6 +1848,22 @@ ParseResult parse(const std::string& source) {
                     if (ser.color.empty() && !d.linetype_colors.empty() &&
                         !d.linetype_colors[0].empty()) {
                         ser.color = d.linetype_colors[0];
+                    }
+                    // Apply a named line style unless the series overrides its color
+                    // or linewidth explicitly.
+                    const auto ls = keyword_value(spec, "ls");
+                    if (!ls.empty()) {
+                        const auto it = named_line_styles.find(std::stoi(ls));
+                        if (it == named_line_styles.end())
+                            throw std::runtime_error("unknown named line style: " + ls);
+                        if (!ser.explicit_color) {
+                            ser.color = it->second.color;
+                            ser.explicit_color = true;
+                        }
+                        ser.width = it->second.width;
+                        ser.line_type = it->second.line_type;
+                        if (ser.line_type == 0)
+                            ser.dash_type = 3;
                     }
                     // Keep gnuplot line width on both ordinary series and constant
                     // functions.

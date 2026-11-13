@@ -150,6 +150,8 @@ void emit_tics(std::ostringstream& o,
     if (tics.rotation != 0)
         o << "plt.setp(" << target << ".get_" << axis << "ticklabels(), rotation=" << tics.rotation
           << ", ha='right')\n";
+    if (tics.font_size)
+        o << target << ".tick_params(axis='" << axis << "', labelsize=" << *tics.font_size << ")\n";
     if (tics.outward) {
         o << target << ".tick_params(axis='" << axis << "', direction='out')\n";
     }
@@ -467,6 +469,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // Translate the gnuplot dash type into a matplotlib line style.
             if (s.dash_type == 2) {
                 o << "kw['linestyle'] = '--'\n";
+            } else if (s.dash_type == 3) {
+                // Gnuplot's line type 0 uses a dotted reference line.
+                o << "kw['linestyle'] = ':'\n";
             }
             if (s.analytic_y) {
                 // The analytic-function translator currently uses Cartesian x.
@@ -618,14 +623,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 case Style::Points:
                     // Store the actual Matplotlib artist, so hover labels use the
                     // final coordinates (including the polar-to-Cartesian transform).
-                    o << "_gp_hover_artist = target.scatter(x, y, s=18, **kw)\n";
+                    o << "_gp_hover_artist = target.scatter(x, y, s=" << std::setprecision(17) << (18 * s.point_size * s.point_size) << ", **kw)\n";
                     o << "_gp_hover_artists.append(_gp_hover_artist)\n";
                     break;
                 case Style::Dots:
-                    o << "target.scatter(x, y, s=4, **kw)\n";
+                    o << "target.scatter(x, y, s=" << std::setprecision(17) << (4 * s.point_size * s.point_size) << ", **kw)\n";
                     break;
                 case Style::LinesPoints:
-                    o << "_gp_hover_artist, = target.plot(x, y, marker='o', zorder=3, **kw)\n";
+                    o << "_gp_hover_artist, = target.plot(x, y, marker='o', markersize=" << std::setprecision(17) << (6 * s.point_size) << ", zorder=3, **kw)\n";
                     o << "_gp_hover_artists.append(_gp_hover_artist)\n";
                     break;
                 case Style::Impulses:
@@ -750,6 +755,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "ax2.set_yscale('log', base=" << p.y2.log_base << ")\n";
             }
         }
+        if (p.axis_offsets) {
+            // Bare numeric offsets add to the data limits, not to fractions
+            // of the axes width or height.
+            const auto& offsets = *p.axis_offsets;
+            o << "_gp_x0, _gp_x1 = ax.dataLim.intervalx\n";
+            o << "_gp_y0, _gp_y1 = ax.dataLim.intervaly\n";
+            if (!p.x.min && !p.x.max && !p.x.log)
+                o << "ax.set_xlim(_gp_x0 - " << offsets[0] << ", _gp_x1 + " << offsets[1] << ")\n";
+            if (!p.y.min && !p.y.max && !p.y.log)
+                o << "ax.set_ylim(_gp_y0 - " << offsets[3] << ", _gp_y1 + " << offsets[2] << ")\n";
+        }
         if (p.graph_offsets) {
             // Convert graph-relative fractions to data-coordinate extensions.
             // Unlike symmetric ax.margins(), this preserves independent sides.
@@ -807,9 +823,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     !d.linetype_colors[label.point_line_type - 1].empty()) {
                     color = mpl_color(d.linetype_colors[label.point_line_type - 1]);
                 }
+                if (!label.point_color.empty())
+                    color = mpl_color(label.point_color);
+                const std::string marker = label.point_type == 7 ? "o" : "+";
                 o << "ax.plot([" << std::setprecision(17) << label.x << "], [" << label.y
-                  << "], marker='+', linestyle='None', markersize=8, color=" << pystr(color)
+                  << "], marker=" << pystr(marker) << ", linestyle='None', markersize="
+                  << (8 * label.point_size) << ", color=" << pystr(color)
                   << ", zorder=5)\n";
+                if (label.text.empty()) continue;
                 // Gnuplot's offset units are character cells, approximately
                 // six points wide/tall at the default font size.
                 o << "ax.annotate(" << pystr(label.text) << ", (" << label.x << ", " << label.y

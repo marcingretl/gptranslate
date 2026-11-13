@@ -53,6 +53,8 @@ struct Series {
     int line_type{-1};
     int yaxis{1};
     double width{1.5};
+    // Global pointsize multiplier in effect when this series was parsed.
+    double point_size{1.0};
     // Constant functions are independent of inline or named data sources.
     std::optional<double> constant_y;
     // Affine function y = intercept + slope*x, independent of data rows.
@@ -82,6 +84,8 @@ struct Tics {
     double rotation{0};
     bool outward{false};
     bool mirror{true};
+    // Optional size requested by the gnuplot tic font modifier.
+    std::optional<double> font_size;
 };
 struct Axis {
     std::string label;
@@ -128,11 +132,19 @@ struct Plot {
         bool point_marker{false};
         double offset_x{0}, offset_y{0};
         int point_line_type{-1};
+        // Point-only labels use their own marker type, color and size.
+        int point_type{1};
+        double point_size{1.0};
+        std::string point_color{};
     };
     std::vector<Label> labels;
     bool xtics_disabled{false}, ytics_disabled{false};
     // Gnuplot offsets in graph-relative units: left, right, top, bottom.
     std::optional<std::array<double, 4>> graph_offsets;
+    // Numeric offsets are additive extensions in x/y data units.
+    std::optional<std::array<double, 4>> axis_offsets;
+    // Size multiplier established by set pointsize for subsequent plot items.
+    double point_size{1.0};
     // Polar data columns are angle (radians) and radius, not Cartesian x/y.
     bool polar{false};
     // `set size square` fixes the axes geometry, unlike a multiplot panel size.

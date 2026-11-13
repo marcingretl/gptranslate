@@ -197,3 +197,7 @@ test('freq-gamma-density', py, args: [meson.current_source_dir() / 'tests' / 'ch
 # Real gretl4py gallery examples: scatter graph offsets and NaN heatmap cells.
 test('gallery-d12-scatters', py, args: [meson.current_source_dir() / 'tests' / 'check_gallery_d12.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'gallery-d12-scatters.gp', meson.current_build_dir() / 'gallery-d12-scatters.py'])
 test('gallery-d18-corr-triangle', py, args: [meson.current_source_dir() / 'tests' / 'check_gallery_d18.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'gallery-d18-corr-triangle.gp', meson.current_build_dir() / 'gallery-d18-corr-triangle.py'])
+
+# PairPlot uses numeric offsets, font-sized ticks, global pointsize,
+# numbered point markers, and named line styles in its scatter matrix.
+test('pairplot-compat', py, args: [meson.current_source_dir() / 'tests' / 'check_pairplot_compat.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'pairplot-compat.gp', meson.current_build_dir() / 'pairplot-compat.py'])
