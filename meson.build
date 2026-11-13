@@ -201,3 +201,6 @@ test('gallery-d18-corr-triangle', py, args: [meson.current_source_dir() / 'tests
 # PairPlot uses numeric offsets, font-sized ticks, global pointsize,
 # numbered point markers, and named line styles in its scatter matrix.
 test('pairplot-compat', py, args: [meson.current_source_dir() / 'tests' / 'check_pairplot_compat.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'pairplot-compat.gp', meson.current_build_dir() / 'pairplot-compat.py'])
+
+# DYconn/heatmap uses a global tick style and resets the palette colorbar.
+test('dyconn-heatmap', py, args: [meson.current_source_dir() / 'tests' / 'check_dyconn_heatmap.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'dyconn-heatmap.gp', meson.current_build_dir() / 'dyconn-heatmap.py'])

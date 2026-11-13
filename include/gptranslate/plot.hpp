@@ -83,6 +83,8 @@ struct Tics {
     std::optional<double> major_scale, minor_scale;
     double rotation{0};
     bool outward{false};
+    // An explicit in/out directive overrides Matplotlib's tick direction.
+    bool direction_explicit{false};
     bool mirror{true};
     // Optional size requested by the gnuplot tic font modifier.
     std::optional<double> font_size;

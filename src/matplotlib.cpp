@@ -152,8 +152,9 @@ void emit_tics(std::ostringstream& o,
           << ", ha='right')\n";
     if (tics.font_size)
         o << target << ".tick_params(axis='" << axis << "', labelsize=" << *tics.font_size << ")\n";
-    if (tics.outward) {
-        o << target << ".tick_params(axis='" << axis << "', direction='out')\n";
+    if (tics.direction_explicit) {
+        o << target << ".tick_params(axis='" << axis << "', direction='"
+          << (tics.outward ? "out" : "in") << "')\n";
     }
     if (tics.major_scale && *tics.major_scale == 0)
         o << target << ".tick_params(axis='" << axis << "', length=0)\n";
@@ -332,8 +333,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
               << "])\n";
         } else {
             // A skipped gridplot cell has no Plot, so use its explicit index.
-            const auto cells = static_cast<size_t>((d.multiplot ? d.rows : 1) *
-                                                   (d.multiplot ? d.cols : 1));
+            const auto cells =
+                static_cast<size_t>((d.multiplot ? d.rows : 1) * (d.multiplot ? d.cols : 1));
             if (p.panel_index >= cells)
                 throw std::runtime_error("more plots than multiplot cells");
             o << "ax = axes[" << p.panel_index << "]\n";
@@ -623,14 +624,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 case Style::Points:
                     // Store the actual Matplotlib artist, so hover labels use the
                     // final coordinates (including the polar-to-Cartesian transform).
-                    o << "_gp_hover_artist = target.scatter(x, y, s=" << std::setprecision(17) << (18 * s.point_size * s.point_size) << ", **kw)\n";
+                    o << "_gp_hover_artist = target.scatter(x, y, s=" << std::setprecision(17)
+                      << (18 * s.point_size * s.point_size) << ", **kw)\n";
                     o << "_gp_hover_artists.append(_gp_hover_artist)\n";
                     break;
                 case Style::Dots:
-                    o << "target.scatter(x, y, s=" << std::setprecision(17) << (4 * s.point_size * s.point_size) << ", **kw)\n";
+                    o << "target.scatter(x, y, s=" << std::setprecision(17)
+                      << (4 * s.point_size * s.point_size) << ", **kw)\n";
                     break;
                 case Style::LinesPoints:
-                    o << "_gp_hover_artist, = target.plot(x, y, marker='o', markersize=" << std::setprecision(17) << (6 * s.point_size) << ", zorder=3, **kw)\n";
+                    o << "_gp_hover_artist, = target.plot(x, y, marker='o', markersize="
+                      << std::setprecision(17) << (6 * s.point_size) << ", zorder=3, **kw)\n";
                     o << "_gp_hover_artists.append(_gp_hover_artist)\n";
                     break;
                 case Style::Impulses:
@@ -774,17 +778,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "_gp_y0, _gp_y1 = ax.dataLim.intervaly\n";
             if (!p.x.min && !p.x.max && !p.x.log) {
                 o << "if _gp_x1 > _gp_x0:\n";
-                o << "    _gp_span = (_gp_x1 - _gp_x0) / "
-                  << (1.0 - offsets[0] - offsets[1]) << "\n";
-                o << "    ax.set_xlim(_gp_x0 - " << offsets[0]
-                  << " * _gp_span, _gp_x1 + " << offsets[1] << " * _gp_span)\n";
+                o << "    _gp_span = (_gp_x1 - _gp_x0) / " << (1.0 - offsets[0] - offsets[1])
+                  << "\n";
+                o << "    ax.set_xlim(_gp_x0 - " << offsets[0] << " * _gp_span, _gp_x1 + "
+                  << offsets[1] << " * _gp_span)\n";
             }
             if (!p.y.min && !p.y.max && !p.y.log) {
                 o << "if _gp_y1 > _gp_y0:\n";
-                o << "    _gp_span = (_gp_y1 - _gp_y0) / "
-                  << (1.0 - offsets[2] - offsets[3]) << "\n";
-                o << "    ax.set_ylim(_gp_y0 - " << offsets[3]
-                  << " * _gp_span, _gp_y1 + " << offsets[2] << " * _gp_span)\n";
+                o << "    _gp_span = (_gp_y1 - _gp_y0) / " << (1.0 - offsets[2] - offsets[3])
+                  << "\n";
+                o << "    ax.set_ylim(_gp_y0 - " << offsets[3] << " * _gp_span, _gp_y1 + "
+                  << offsets[2] << " * _gp_span)\n";
             }
         }
         if (p.xzeroaxis) {
@@ -827,10 +831,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     color = mpl_color(label.point_color);
                 const std::string marker = label.point_type == 7 ? "o" : "+";
                 o << "ax.plot([" << std::setprecision(17) << label.x << "], [" << label.y
-                  << "], marker=" << pystr(marker) << ", linestyle='None', markersize="
-                  << (8 * label.point_size) << ", color=" << pystr(color)
-                  << ", zorder=5)\n";
-                if (label.text.empty()) continue;
+                  << "], marker=" << pystr(marker)
+                  << ", linestyle='None', markersize=" << (8 * label.point_size)
+                  << ", color=" << pystr(color) << ", zorder=5)\n";
+                if (label.text.empty())
+                    continue;
                 // Gnuplot's offset units are character cells, approximately
                 // six points wide/tall at the default font size.
                 o << "ax.annotate(" << pystr(label.text) << ", (" << label.x << ", " << label.y
@@ -952,15 +957,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "for _gp_index, _gp_ax in enumerate(axes):\n";
         o << "    if _gp_index not in {";
         for (size_t j = 0; j < d.plots.size(); ++j) {
-            if (j) o << ", ";
+            if (j)
+                o << ", ";
             o << d.plots[j].panel_index;
         }
         o << "}: _gp_ax.set_visible(False)\n";
         // Reserve space for a multiplot heading when one is present.
         // tight_layout also accounts for legends attached outside the axes.
-        o << (d.multiplot_title.empty()
-                  ? "fig.tight_layout()\n"
-                  : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
+        o << (d.multiplot_title.empty() ? "fig.tight_layout()\n"
+                                        : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
     }
     if (hover_points)
         emit_point_hover(o);

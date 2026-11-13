@@ -37,8 +37,8 @@ namespace {
 // the constant pi, and arithmetic only.
 // Invalid expressions are rejected instead of being silently reduced to a
 // constant.
-std::optional<std::string> analytic_expression(
-    const std::string& input, const std::map<std::string, double>& variables) {
+std::optional<std::string> analytic_expression(const std::string& input,
+                                               const std::map<std::string, double>& variables) {
     static const std::regex token(
         R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|[+*/()\-])");
     std::string result;
@@ -360,8 +360,7 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
     for (const auto& item : split_specs(definition.substr(left + 1, right - left - 1))) {
         std::smatch match;
         static const std::regex named_re(R"(^\s*([^\s]+)\s+(['\"])(.*?)\2\s*$)");
-        static const std::regex rgb_re(
-            R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
+        static const std::regex rgb_re(R"(^\s*([^\s]+)\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*$)");
         PaletteStop stop;
         if (std::regex_match(item, match, named_re)) {
             const auto value = number(match[1].str());
@@ -374,8 +373,8 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
             const auto red = number(match[2].str());
             const auto green = number(match[3].str());
             const auto blue = number(match[4].str());
-            if (!value || !red || !green || !blue || *red < 0 || *red > 1 ||
-                *green < 0 || *green > 1 || *blue < 0 || *blue > 1)
+            if (!value || !red || !green || !blue || *red < 0 || *red > 1 || *green < 0 ||
+                *green > 1 || *blue < 0 || *blue > 1)
                 throw std::runtime_error("invalid RGB palette stop: " + item);
             stop.value = *value;
             stop.rgb = std::array<double, 3>{*red, *green, *blue};
@@ -464,14 +463,22 @@ void parse_tics(Tics& tics, const std::string& spec) {
         }
     }
     // A font modifier such as font ',7' specifies tick-label size.
-    static const std::regex font_re(R"GP((?:^|\s)font\s+(['"])([^'",]*),([0-9]+(?:\.[0-9]+)?)\1(?=\s|$))GP");
+    static const std::regex font_re(
+        R"GP((?:^|\s)font\s+(['"])([^'",]*),([0-9]+(?:\.[0-9]+)?)\1(?=\s|$))GP");
     if (std::regex_search(spec, match, font_re)) {
         tics.font_size = std::stod(match[3].str());
         if (*tics.font_size <= 0)
             throw std::runtime_error("invalid tic font size");
     }
-    if (std::regex_search(spec, std::regex(R"((?:^|\s)out(?:\s|$))")))
+    // `in` and `out` are mutually exclusive; later directives win.
+    if (std::regex_search(spec, std::regex(R"((?:^|\s)in(?:\s|$))"))) {
+        tics.outward = false;
+        tics.direction_explicit = true;
+    }
+    if (std::regex_search(spec, std::regex(R"((?:^|\s)out(?:\s|$))"))) {
         tics.outward = true;
+        tics.direction_explicit = true;
+    }
     // A numeric tic specification is incr or start,incr[,end].
     // Keep previously configured properties (such as nomirror) intact.
     static const std::regex numeric_tics_re(
@@ -492,6 +499,7 @@ void parse_tics(Tics& tics, const std::string& spec) {
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)format\s+(['"])(.*?)\1)"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)scale\s+[^\s]+)"), " ");
     rest = std::regex_replace(rest, font_re, " ");
+    rest = std::regex_replace(rest, std::regex(R"((?:^|\s)in(?:\s|$))"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)out(?:\s|$))"), " ");
     // Mirroring is a per-axis property, not an unsupported tic modifier.
     if (std::regex_search(spec, std::regex(R"((?:^|\s)nomirror(?:\s|$))")))
@@ -937,8 +945,7 @@ ParseResult parse(const std::string& source) {
             // Preserve active scalar assignments in the plotting environment.
             // Never execute arbitrary gnuplot text as Python source.
             std::smatch scalar_assignment;
-            static const std::regex scalar_pattern(
-                R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
+            static const std::regex scalar_pattern(R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
             if (std::regex_match(s, scalar_assignment, scalar_pattern)) {
                 plot_scalars[scalar_assignment[1].str()] =
                     scalar_value(scalar_assignment[2].str(), plot_scalars);
@@ -1005,6 +1012,15 @@ ParseResult parse(const std::string& source) {
                 p->mirror_tics = true;
                 continue;
             }
+            // Global tics directives are shared by the primary axes. In
+            // particular, heatmap uses `nomirror in font ",12"`.
+            if (starts(s, "set tics ")) {
+                const auto spec = trim(s.substr(std::string("set tics ").size()));
+                parse_tics(p->x.tics, spec);
+                parse_tics(p->y.tics, spec);
+                p->mirror_tics = p->x.tics.mirror && p->y.tics.mirror;
+                continue;
+            }
             // Graph offsets are fractions of the plot range; bare numeric
             // offsets are additive data units. Preserve the distinction.
             if (starts(s, "set offsets ")) {
@@ -1023,8 +1039,7 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("invalid graph offsets: " + parts[k]);
                     offsets[k] = *value;
                 }
-                if (graph_units &&
-                    (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1))
+                if (graph_units && (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1))
                     throw std::runtime_error("graph offsets exceed available plot area");
                 p->graph_offsets = graph_units ? std::optional(offsets) : std::nullopt;
                 p->axis_offsets = graph_units ? std::nullopt : std::optional(offsets);
@@ -1289,8 +1304,8 @@ ParseResult parse(const std::string& source) {
             if (s == "set multiplot next") {
                 // A gridplot layout may skip cells without creating a drawable plot.
                 // The current Plot is the empty placeholder for the next panel.
-                if (!d.multiplot || !multiplot_layout || !p->series.empty() ||
-                    !p->images.empty() || !p->matrix_labels.empty())
+                if (!d.multiplot || !multiplot_layout || !p->series.empty() || !p->images.empty() ||
+                    !p->matrix_labels.empty())
                     throw std::runtime_error("set multiplot next requires an empty layout panel");
                 ++p->panel_index;
                 continue;
@@ -1488,7 +1503,9 @@ ParseResult parse(const std::string& source) {
                 p->colorbox = false;
                 continue;
             }
-            if (s == "set colorbox") {
+            // Both commands enable the default-position palette colorbar.
+            // No user-positioned colorbox geometry is represented in the IR.
+            if (s == "set colorbox" || s == "set colorbox default") {
                 p->colorbox = true;
                 continue;
             }
@@ -1717,10 +1734,9 @@ ParseResult parse(const std::string& source) {
                                 const std::string alpha = "(" + shape.str() + ")";
                                 const std::string beta = "(" + scale.str() + ")";
                                 analytic_value =
-                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" +
-                                    beta + "-math.lgamma(" + alpha + ")-" + alpha +
-                                    "*math.log(" + beta + ")) if value > 0 else " +
-                                    "(0.0 if " + alpha + " > 1.0 else " +
+                                    "(math.exp((" + alpha + "-1.0)*math.log(value)-value/" + beta +
+                                    "-math.lgamma(" + alpha + ")-" + alpha + "*math.log(" + beta +
+                                    ")) if value > 0 else " + "(0.0 if " + alpha + " > 1.0 else " +
                                     "(1.0/" + beta + " if " + alpha +
                                     " == 1.0 else float('inf'))))";
                             }
@@ -1787,8 +1803,8 @@ ParseResult parse(const std::string& source) {
                         style = keyword_value(spec, "w");
                     }
                     if (style.empty()) {
-                        ser.style = (constant_value || analytic_value) ? Style::Lines
-                                                                       : default_style;
+                        ser.style =
+                            (constant_value || analytic_value) ? Style::Lines : default_style;
                     } else if (style == "lines" || style == "l") {
                         ser.style = Style::Lines;
                     } else if (style == "hist" || style == "histogram" || style == "histograms") {
@@ -1912,9 +1928,8 @@ ParseResult parse(const std::string& source) {
                     // Arithmetic using expressions need per-row evaluation.
                     // Search only after 'using' (or 'u'): named sources such
                     // as $data are not column expressions.
-                    const bool using_expr =
-                        !filled && !errorbars && has_using &&
-                        spec.find('$', *using_pos) != spec.npos;
+                    const bool using_expr = !filled && !errorbars && has_using &&
+                                            spec.find('$', *using_pos) != spec.npos;
                     const auto fields = candle     ? using_fields(spec, 5)
                                       : filled     ? using_fields(spec)
                                       : using_expr ? using_fields(spec, 2)
