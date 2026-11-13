@@ -176,18 +176,17 @@ void emit_tics(std::ostringstream& o,
             // The exact independent screen-x/screen-y translation is retained
             // in the IR for future 3D rendering improvements.
             o << target << ".tick_params(axis='" << axis << "', pad="
-              << "7 + (0.6 * " << dx << " + " << dy
-              << ") * "
-              << (tics.font_size ? std::to_string(*tics.font_size)
-                                 : "plt.rcParams['font.size']") << ")\n";
+              << "7 + (0.6 * " << dx << " + " << dy << ") * "
+              << (tics.font_size ? std::to_string(*tics.font_size) : "plt.rcParams['font.size']")
+              << ")\n";
         } else {
             // Gnuplot offsets label text in character cells; approximate one
             // character width as 0.6 em and height as 1 em, in screen points.
             o << "for _gp_tick_label in " << target << ".get_" << axis << "ticklabels():\n";
             o << "    _gp_size = _gp_tick_label.get_fontsize()\n";
             o << "    _gp_tick_label.set_transform(_gp_tick_label.get_transform() + "
-                 "ScaledTranslation(0.6 * " << dx << " * _gp_size / 72, "
-              << dy << " * _gp_size / 72, fig.dpi_scale_trans))\n";
+                 "ScaledTranslation(0.6 * "
+              << dx << " * _gp_size / 72, " << dy << " * _gp_size / 72, fig.dpi_scale_trans))\n";
         }
     }
 }
@@ -293,6 +292,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     if (d.plots.empty()) {
         throw std::runtime_error("no plots");
     }
+    // Position explicit palette colorboxes only after tight_layout has adjusted
+    // regular panels. Matplotlib otherwise warns about manually inserted axes.
+    const bool positioned_colorboxes =
+        std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+            return p.colorbox && p.colorbox_position.has_value();
+        });
     // Register hover handling only when the plot contains visible point markers.
     // Lines and synthetic reference curves must not trigger a tooltip.
     const bool hover_points = std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
@@ -319,8 +324,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
          "AutoMinorLocator\n";
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
     // NumPy is only required for grid-based contour rendering.
-    if (std::any_of(
-            d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty() || !p.surfaces.empty(); }))
+    if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+            return !p.contours.empty() || !p.surfaces.empty();
+        }))
         o << "import numpy as np\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
     o << "from datetime import datetime, timezone\n";
@@ -346,6 +352,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     // A multiplot title is a figure-level heading, not the first panel's title.
     if (!d.multiplot_title.empty())
         o << "fig.suptitle(" << pystr(d.multiplot_title) << ")\n";
+    if (positioned_colorboxes)
+        o << "_gp_manual_colorbars = []\n";
     for (size_t j = 0; j < d.plots.size(); ++j) {
         const auto& p = d.plots[j];
         if (d.positioned_multiplot) {
@@ -436,8 +444,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                         // dgrid3d surface; exact hits use the source point.
                         o << "_gp_surface_x, _gp_surface_y = np.meshgrid("
                              "np.linspace(_gp_xyz[:,0].min(), _gp_xyz[:,0].max(), "
-                          << nx << "), np.linspace(_gp_xyz[:,1].min(), "
-                             "_gp_xyz[:,1].max(), " << ny << "))\n";
+                          << nx
+                          << "), np.linspace(_gp_xyz[:,1].min(), "
+                             "_gp_xyz[:,1].max(), "
+                          << ny << "))\n";
                         o << "_gp_dx = np.abs(_gp_surface_x[...,None] - _gp_xyz[:,0])\n";
                         o << "_gp_dy = np.abs(_gp_surface_y[...,None] - _gp_xyz[:,1])\n";
                         o << "_gp_dist = _gp_dx**" << qnorm << " + _gp_dy**" << qnorm << "\n";
@@ -465,14 +475,22 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 if (p.colors.min || p.colors.max) {
                     o << ", norm=Normalize(vmin="
                       << (p.colors.min ? std::to_string(*p.colors.min) : "None")
-                      << ", vmax="
-                      << (p.colors.max ? std::to_string(*p.colors.max) : "None") << ")";
+                      << ", vmax=" << (p.colors.max ? std::to_string(*p.colors.max) : "None")
+                      << ")";
                 }
                 o << ")\n";
                 if (p.colorbox) {
-                    o << "_gp_colorbar = fig.colorbar(_gp_surface, ax=ax, shrink=0.65)\n";
-                    if (!p.colors.label.empty())
-                        o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                    if (p.colorbox_position) {
+                        // Defer figure-relative geometry until after tight_layout.
+                        const auto& rect = *p.colorbox_position;
+                        o << "_gp_manual_colorbars.append((_gp_surface, (" << rect[0] << ", "
+                          << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
+                          << pystr(p.colors.label) << "))\n";
+                    } else {
+                        o << "_gp_colorbar = fig.colorbar(_gp_surface, ax=ax, shrink=0.65)\n";
+                        if (!p.colors.label.empty())
+                            o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                    }
                 }
             }
             o << "ax.set_title(" << pystr(p.title) << ")\n";
@@ -525,9 +543,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // Colorboxes are optional; the most recently rendered image owns the
             // scale.
             if (p.colorbox) {
-                o << "_gp_colorbar = fig.colorbar(ax.images[-1], ax=ax)\n";
-                if (!p.colors.label.empty())
-                    o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                if (p.colorbox_position) {
+                    // Explicit colorbox placement is relative to the whole figure.
+                    const auto& rect = *p.colorbox_position;
+                    o << "_gp_manual_colorbars.append((ax.images[-1], (" << rect[0] << ", "
+                      << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
+                      << pystr(p.colors.label) << "))\n";
+                } else {
+                    o << "_gp_colorbar = fig.colorbar(ax.images[-1], ax=ax)\n";
+                    if (!p.colors.label.empty())
+                        o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                }
             }
         }
         // A flat `splot ... matrix with lines` is a 2D contour map, not a
@@ -1167,6 +1193,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // tight_layout also accounts for legends attached outside the axes.
         o << (d.multiplot_title.empty() ? "fig.tight_layout()\n"
                                         : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
+    }
+    if (positioned_colorboxes) {
+        // Explicit Gnuplot colorboxes use fixed screen coordinates unaffected
+        // by adjustments to regular Matplotlib subplot axes.
+        o << "for _gp_mappable, _gp_bounds, _gp_label in _gp_manual_colorbars:\n"
+             "    _gp_colorbox_ax = fig.add_axes(_gp_bounds)\n"
+             "    _gp_colorbar = fig.colorbar(_gp_mappable, cax=_gp_colorbox_ax)\n"
+             "    if _gp_label: _gp_colorbar.set_label(_gp_label)\n";
     }
     if (hover_points)
         emit_point_hover(o);

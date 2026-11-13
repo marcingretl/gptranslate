@@ -229,3 +229,9 @@ test('heatmap-surface-3d', py, args: [meson.current_source_dir() / 'tests' / 'ch
 
 # Explicit XYZ pm3d points use Gnuplot qnorm dgrid3d before plotting.
 test('heatmap-surface-xyz', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_surface_xyz.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-surface-xyz.gp', meson.current_build_dir() / 'heatmap-surface-xyz.py'])
+
+# Gnuplot user-positioned palette colorboxes use screen/figure coordinates
+# and must not replace Matplotlib's default colorbar placement elsewhere.
+test('heatmap-colorbox-user-3d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-user-3d.gp', meson.current_build_dir() / 'heatmap-colorbox-user-3d.py', '3d'])
+test('heatmap-colorbox-user-2d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-user-2d.gp', meson.current_build_dir() / 'heatmap-colorbox-user-2d.py', 'rectilinear'])
+test('heatmap-colorbox-reset', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-reset.gp', meson.current_build_dir() / 'heatmap-colorbox-reset.py', 'reset'])

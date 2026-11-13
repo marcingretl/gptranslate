@@ -202,6 +202,9 @@ struct Plot {
     std::string legend_horizontal{"right"}, legend_vertical{"center"};
     // Gnuplot colorbox visibility applies to palette-based matrix images.
     bool colorbox{true};
+    // User-positioned colorbox rectangle in screen/figure fractions:
+    // left, bottom, width, height. Missing value selects default placement.
+    std::optional<std::array<double, 4>> colorbox_position;
     bool mirror_tics{true}, xzeroaxis{false}, yzeroaxis{false};
     // Approximate gnuplot solid fill density for box-style plots.
     double fill_alpha{1.0};

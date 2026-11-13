@@ -323,8 +323,8 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
 }
 // Read a named data block as explicit XYZ points selected by 1-based columns.
 // Blank rows delimit Gnuplot scans; dgrid3d treats all scans as scattered data.
-std::vector<std::array<double, 3>> parse_xyz_points(
-    const std::vector<std::string>& rows, const std::array<int, 3>& columns) {
+std::vector<std::array<double, 3>> parse_xyz_points(const std::vector<std::string>& rows,
+                                                    const std::array<int, 3>& columns) {
     std::vector<std::array<double, 3>> points;
     const int max_column = *std::max_element(columns.begin(), columns.end());
     for (const auto& raw : rows) {
@@ -1665,15 +1665,40 @@ ParseResult parse(const std::string& source) {
             // Other linked-axis transformations require an explicit mapping.
             if (starts(s, "set link "))
                 throw std::runtime_error("unsupported linked-axis transformation: " + s);
-            // Colorbox visibility is independent of the image palette.
+            // Colorbox visibility and placement are independent of the palette.
             if (s == "unset colorbox") {
                 p->colorbox = false;
+                p->colorbox_position.reset();
                 continue;
             }
-            // Both commands enable the default-position palette colorbar.
-            // No user-positioned colorbox geometry is represented in the IR.
+            // Both commands restore the default-position palette colorbar.
             if (s == "set colorbox" || s == "set colorbox default") {
                 p->colorbox = true;
+                p->colorbox_position.reset();
+                continue;
+            }
+            if (starts(s, "set colorbox user")) {
+                // For 3D plots Gnuplot uses screen coordinates (fractions of the
+                // whole figure) for the explicitly positioned colorbox.
+                // The optional `screen` keyword also works in 2D.
+                static const std::string real =
+                    R"([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)";
+                static const std::regex user_re(
+                    "^set colorbox user origin(?: screen)?\\s+(" + real + ")\\s*,\\s*(" + real +
+                    ")\\s+size(?: screen)?\\s+(" + real + ")\\s*,\\s*(" + real + ")\\s*$");
+                std::smatch match;
+                if (!std::regex_match(s, match, user_re))
+                    throw std::runtime_error("unsupported colorbox geometry: " + s);
+                std::array<double, 4> position{};
+                for (size_t i = 0; i < position.size(); ++i)
+                    position[i] = std::stod(match[i + 1].str());
+                if (!std::all_of(position.begin(),
+                                 position.end(),
+                                 [](double value) { return std::isfinite(value); }) ||
+                    position[2] <= 0 || position[3] <= 0)
+                    throw std::runtime_error("invalid colorbox geometry: " + s);
+                p->colorbox = true;
+                p->colorbox_position = position;
                 continue;
             }
             // Gnuplot can use splot to compute contours in a flat XY view.
@@ -1738,13 +1763,12 @@ ParseResult parse(const std::string& source) {
                 static const std::regex dgrid_re(
                     R"(^set dgrid3d\s+([0-9]+)\s*,\s*([0-9]+)\s+qnorm\s+([0-9]+)\s*$)");
                 std::smatch match;
-                if (!std::regex_match(s, match, dgrid_re) ||
-                    std::stoi(match[1].str()) < 2 || std::stoi(match[2].str()) < 2 ||
-                    std::stoi(match[3].str()) < 1)
+                if (!std::regex_match(s, match, dgrid_re) || std::stoi(match[1].str()) < 2 ||
+                    std::stoi(match[2].str()) < 2 || std::stoi(match[3].str()) < 1)
                     throw std::runtime_error("unsupported dgrid3d directive: " + s);
                 dgrid3d = std::array<int, 3>{std::stoi(match[1].str()),
-                                            std::stoi(match[2].str()),
-                                            std::stoi(match[3].str())};
+                                             std::stoi(match[2].str()),
+                                             std::stoi(match[3].str())};
                 continue;
             }
             if (s == "unset dgrid3d") {
@@ -1815,7 +1839,8 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("mixed 2D and 3D plot is unsupported");
                     const auto block = d.data_blocks.find(surface_match[1].str());
                     if (block == d.data_blocks.end())
-                        throw std::runtime_error("unknown 3D data block: " + surface_match[1].str());
+                        throw std::runtime_error("unknown 3D data block: " +
+                                                 surface_match[1].str());
                     SurfaceGrid surface;
                     const std::array<int, 3> columns{std::stoi(surface_match[2].str()),
                                                      std::stoi(surface_match[3].str()),
@@ -1834,7 +1859,8 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("mixed 2D and 3D plot is unsupported");
                     const auto block = d.data_blocks.find(surface_match[1].str());
                     if (block == d.data_blocks.end())
-                        throw std::runtime_error("unknown 3D data block: " + surface_match[1].str());
+                        throw std::runtime_error("unknown 3D data block: " +
+                                                 surface_match[1].str());
                     SurfaceGrid surface;
                     surface.matrix = parse_matrix(block->second);
                     if (surface.matrix.rows.size() < 2 || surface.matrix.rows[0].size() < 2)
