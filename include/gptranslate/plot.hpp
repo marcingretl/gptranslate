@@ -102,6 +102,17 @@ struct ImageMatrix {
 };
 // Text labels attached to numeric matrix cells. The coordinates and values
 // follow gnuplot's matrix pseudo-columns ($1, $2, $3).
+// Gnuplot `splot ... matrix with lines` can request contours viewed from
+// above. Keep this two-dimensional grid separate from 3D surfaces.
+struct ContourGrid {
+    ImageMatrix matrix;
+    // A count requests automatic levels; an explicit vector uses exact values.
+    int level_count{0};
+    std::vector<double> levels;
+    // The first contour linetype selects colors from global `set linetype`.
+    std::vector<std::string> colors;
+    std::vector<double> widths;
+};
 struct MatrixLabels {
     ImageMatrix matrix;
     std::string format;
@@ -189,6 +200,7 @@ struct Plot {
     std::string border_color;
     std::vector<Series> series;
     std::vector<ImageMatrix> images;
+    std::vector<ContourGrid> contours;
     std::vector<MatrixLabels> matrix_labels;
     ColorScale colors;
 };
@@ -197,6 +209,8 @@ struct Document {
     std::map<std::string, std::vector<std::string>> data_blocks;
     std::vector<Plot> plots;
     std::vector<std::string> linetype_colors;
+    // Line widths are retained separately for contour level styles.
+    std::vector<double> linetype_widths;
     std::string output, terminal{"pngcairo"};
     int width{800}, height{600};
     bool multiplot{false};

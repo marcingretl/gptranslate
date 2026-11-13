@@ -911,9 +911,24 @@ ParseResult parse(const std::string& source) {
             expanded.push_back(lines[source_line]);
             source_lines.push_back(source_line + 1);
         } else {
-            for (const auto& command : split_commands(lines[source_line])) {
+            // Gnuplot's trailing backslash joins physical source lines into
+            // one logical command. This is needed for multi-line RGB palettes;
+            // never join the literal contents of a named data block.
+            const size_t first_line = source_line + 1;
+            std::string command_text = lines[source_line];
+            while (!trim(command_text).empty() && trim(command_text).back() == '\\') {
+                auto part = trim(command_text);
+                part.pop_back();
+                if (source_line + 1 >= lines.size()) {
+                    result.errors.push_back({first_line, "unfinished line continuation"});
+                    command_text = std::move(part);
+                    break;
+                }
+                command_text = part + " " + trim(lines[++source_line]);
+            }
+            for (const auto& command : split_commands(command_text)) {
                 expanded.push_back(command);
-                source_lines.push_back(source_line + 1);
+                source_lines.push_back(first_line);
             }
         }
     }
@@ -932,6 +947,14 @@ ParseResult parse(const std::string& source) {
         }
     }
     std::map<int, NamedLineStyle> named_line_styles;
+    // Preserve the 2D contour view as parser state. A real 3D splot stays
+    // unsupported until the separate surface backend is implemented.
+    bool contour_base = false;
+    bool contour_view_map = false;
+    bool contour_surface = true;
+    int contour_level_count = 0;
+    int contour_first_linetype = 0;
+    std::vector<double> contour_levels;
     for (size_t i = 0; i < lines.size(); ++i) {
         auto s = trim(lines[i]);
         if (s.empty() || s[0] == '#')
@@ -1006,7 +1029,20 @@ ParseResult parse(const std::string& source) {
                         if (d.linetype_colors.size() < static_cast<size_t>(n)) {
                             d.linetype_colors.resize(n);
                         }
-                        d.linetype_colors[n - 1] = keyword_value(s, "lc rgb");
+                        // Some packages use `lc "#rrggbb"` without the optional
+                        // `rgb` keyword. Both forms define the same color.
+                        auto color = keyword_value(s, "lc rgb");
+                        if (color.empty())
+                            color = keyword_value(s, "lc");
+                        d.linetype_colors[n - 1] = color;
+                        // Keep the per-level line width for 2D contour plots.
+                        if (const auto width = number(keyword_value(s, "lw"))) {
+                            if (*width <= 0 || !std::isfinite(*width))
+                                throw std::runtime_error("invalid linetype width: " + s);
+                            if (d.linetype_widths.size() < static_cast<size_t>(n))
+                                d.linetype_widths.resize(n, 1.5);
+                            d.linetype_widths[n - 1] = *width;
+                        }
                     }
                 }
                 continue;
@@ -1327,7 +1363,7 @@ ParseResult parse(const std::string& source) {
                 // A gridplot layout may skip cells without creating a drawable plot.
                 // The current Plot is the empty placeholder for the next panel.
                 if (!d.multiplot || !multiplot_layout || !p->series.empty() || !p->images.empty() ||
-                    !p->matrix_labels.empty())
+                    !p->contours.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("set multiplot next requires an empty layout panel");
                 ++p->panel_index;
                 continue;
@@ -1351,7 +1387,7 @@ ParseResult parse(const std::string& source) {
             if (s == "unset multiplot") {
                 // A trailing configuration-only panel is not a drawable plot.
                 if (d.multiplot && d.plots.size() > 1 && p->series.empty() && p->images.empty() &&
-                    p->matrix_labels.empty()) {
+                    p->contours.empty() && p->matrix_labels.empty()) {
                     d.plots.pop_back();
                     p = &d.plots.back();
                 }
@@ -1360,7 +1396,8 @@ ParseResult parse(const std::string& source) {
             if (s == "reset") {
                 // Reset plot settings for the next panel without discarding
                 // already parsed panels or document-level output settings.
-                if (!p->series.empty() || !p->images.empty() || !p->matrix_labels.empty())
+                if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
+                    !p->matrix_labels.empty())
                     throw std::runtime_error("reset after plot data without a new panel");
                 // Reset the gnuplot settings, but preserve the grid cell selected
                 // by earlier plot commands and any set multiplot next skips.
@@ -1368,6 +1405,13 @@ ParseResult parse(const std::string& source) {
                 *p = Plot{};
                 p->panel_index = panel_index;
                 named_line_styles.clear();
+                // These flags are global Gnuplot state, not per-plot fields.
+                contour_base = false;
+                contour_view_map = false;
+                contour_surface = true;
+                contour_level_count = 0;
+                contour_first_linetype = 0;
+                contour_levels.clear();
                 continue;
             }
             // Gnuplot's default data style applies when a plot item has no `with`
@@ -1536,6 +1580,115 @@ ParseResult parse(const std::string& source) {
                 p->colorbox = true;
                 continue;
             }
+            // Gnuplot can use splot to compute contours in a flat XY view.
+            // These directives are meaningful together; never silently accept
+            // an ordinary 3D surface as a two-dimensional contour plot.
+            if (s == "set contour base") {
+                contour_base = true;
+                continue;
+            }
+            if (s == "unset contour") {
+                contour_base = false;
+                continue;
+            }
+            if (s == "unset surface") {
+                contour_surface = false;
+                continue;
+            }
+            if (s == "set surface") {
+                contour_surface = true;
+                continue;
+            }
+            if (s == "set view map") {
+                contour_view_map = true;
+                continue;
+            }
+            // `isosamples` controls function sampling in gnuplot. An explicit
+            // matrix supplies its own grid, so there is nothing to resample.
+            if (starts(s, "set isosamples ")) {
+                static const std::regex isosamples_re(
+                    R"(^set isosamples\s+([0-9]+)\s*(?:,\s*([0-9]+))?\s*$)");
+                std::smatch match;
+                if (!std::regex_match(s, match, isosamples_re) ||
+                    std::stoi(match[1].str()) < 2 ||
+                    (match[2].matched && std::stoi(match[2].str()) < 2))
+                    throw std::runtime_error("invalid isosamples directive: " + s);
+                continue;
+            }
+            // The heatmap package uses automatically spaced B-spline contour
+            // levels; explicit levels are used when supplied by the caller.
+            if (starts(s, "set cntrparam ")) {
+                static const std::regex count_re(
+                    R"(^set cntrparam\s+bspline\s+levels\s+([0-9]+)\s+firstlinetype\s+([0-9]+)\s*$)");
+                static const std::regex discrete_re(
+                    R"(^set cntrparam\s+levels\s+discrete\s+(.+)$)");
+                std::smatch match;
+                if (std::regex_match(s, match, count_re)) {
+                    contour_level_count = std::stoi(match[1].str());
+                    contour_first_linetype = std::stoi(match[2].str());
+                    if (contour_level_count < 1 || contour_level_count > 256 ||
+                        contour_first_linetype < 1 || contour_first_linetype > 256)
+                        throw std::runtime_error("invalid contour level specification: " + s);
+                    contour_levels.clear();
+                } else if (std::regex_match(s, match, discrete_re)) {
+                    contour_levels.clear();
+                    for (const auto& part : split_specs(match[1].str())) {
+                        auto value = number(trim(part));
+                        if (!value || !std::isfinite(*value))
+                            throw std::runtime_error("invalid discrete contour level: " + part);
+                        contour_levels.push_back(*value);
+                    }
+                    if (contour_levels.empty() ||
+                        !std::is_sorted(contour_levels.begin(), contour_levels.end()) ||
+                        std::adjacent_find(contour_levels.begin(), contour_levels.end()) !=
+                            contour_levels.end())
+                        throw std::runtime_error("contour levels must be strictly increasing");
+                    contour_level_count = 0;
+                } else {
+                    throw std::runtime_error("unsupported contour parameters: " + s);
+                }
+                continue;
+            }
+            if (starts(s, "splot ")) {
+                // Only an explicitly requested flat contour view is supported
+                // at this stage; pm3d and arbitrary 3D data remain errors.
+                static const std::regex contour_plot_re(
+                    R"(^splot\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s+matrix\s+with\s+lines\s*$)");
+                std::smatch match;
+                if (!contour_base || !contour_view_map || contour_surface ||
+                    !std::regex_match(s, match, contour_plot_re))
+                    throw std::runtime_error("unsupported 3D splot: " + s);
+                const auto block = d.data_blocks.find(match[1].str());
+                if (block == d.data_blocks.end())
+                    throw std::runtime_error("unknown contour data block: " + match[1].str());
+                ContourGrid contour;
+                contour.matrix = parse_matrix(block->second);
+                if (contour.matrix.rows.size() < 2 ||
+                    contour.matrix.rows[0].size() < 2)
+                    throw std::runtime_error("contour matrix requires at least 2 x 2 cells");
+                contour.level_count = contour_level_count > 0 ? contour_level_count : 7;
+                contour.levels = contour_levels;
+                // A contour's firstlinetype selects one style per level.
+                // Retain the actual line colors already parsed globally.
+                if (contour_first_linetype > 0) {
+                    const size_t count = contour_levels.empty()
+                                             ? static_cast<size_t>(contour.level_count)
+                                             : contour_levels.size();
+                    for (size_t k = 0; k < count; ++k) {
+                        const size_t index = static_cast<size_t>(contour_first_linetype - 1) + k;
+                        if (index < d.linetype_colors.size() &&
+                            !d.linetype_colors[index].empty())
+                            contour.colors.push_back(d.linetype_colors[index]);
+                        else
+                            break;
+                        contour.widths.push_back(index < d.linetype_widths.size()
+                                                     ? d.linetype_widths[index]
+                                                     : 1.5);
+                    }
+                }
+                p->contours.push_back(std::move(contour));
+                continue;
+            }
             // Preserve time-axis directives; conversion belongs to the backend.
             if (s == "set xdata time") {
                 p->xdata_time = true;
@@ -1681,7 +1834,7 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "plot ")) {
-                if (!p->series.empty() || !p->images.empty()) {
+                if (!p->series.empty() || !p->images.empty() || !p->contours.empty()) {
                     const auto panel_index = p->panel_index;
                     d.plots.emplace_back();
                     p = &d.plots.back();
@@ -2079,6 +2232,7 @@ ParseResult parse(const std::string& source) {
                     ++next.panel_index;
                     next.series.clear();
                     next.images.clear();
+                    next.contours.clear();
                     next.matrix_labels.clear();
                     d.plots.push_back(std::move(next));
                     p = &d.plots.back();

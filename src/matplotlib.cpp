@@ -285,6 +285,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
          "FormatStrFormatter, NullFormatter, "
          "AutoMinorLocator\n";
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
+    // NumPy is only required for grid-based contour rendering.
+    if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty(); }))
+        o << "import numpy as np\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
     o << "from datetime import datetime, timezone\n";
     if (hover_points) {
@@ -384,6 +387,50 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 if (!p.colors.label.empty())
                     o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
             }
+        }
+        // A flat `splot ... matrix with lines` is a 2D contour map, not a
+        // projected 3D surface. Matrix row and column indices are gnuplot's
+        // XY coordinates. Matplotlib computes the level curves from the grid.
+        for (const auto& contour : p.contours) {
+            o << "_gp_contour_values = " << matrix_numbers(contour.matrix) << "\n";
+            o << "_gp_contour_kwargs = {}\n";
+            if (!contour.colors.empty() && contour.levels.empty()) {
+                // Use fixed interior levels when a named linetype palette must
+                // be assigned one-to-one to the requested number of contours.
+                o << "_gp_contour_z = np.asarray(_gp_contour_values, dtype=float)\n";
+                o << "_gp_contour_low = float(np.nanmin(_gp_contour_z))\n";
+                o << "_gp_contour_high = float(np.nanmax(_gp_contour_z))\n";
+                o << "_gp_contour_levels = np.linspace(_gp_contour_low, _gp_contour_high, "
+                  << (contour.level_count + 2) << ")[1:-1]\n";
+            } else if (contour.levels.empty()) {
+                o << "_gp_contour_levels = " << contour.level_count << "\n";
+            } else {
+                o << "_gp_contour_levels = [";
+                for (size_t i = 0; i < contour.levels.size(); ++i) {
+                    if (i) o << ", ";
+                    o << std::setprecision(17) << contour.levels[i];
+                }
+                o << "]\n";
+            }
+            if (!contour.colors.empty()) {
+                o << "_gp_contour_kwargs['colors'] = [";
+                for (size_t i = 0; i < contour.colors.size(); ++i) {
+                    if (i) o << ", ";
+                    o << pystr(mpl_color(contour.colors[i]));
+                }
+                o << "]\n";
+            }
+            if (!contour.widths.empty()) {
+                o << "_gp_contour_kwargs['linewidths'] = [";
+                for (size_t i = 0; i < contour.widths.size(); ++i) {
+                    if (i) o << ", ";
+                    o << std::setprecision(17) << contour.widths[i];
+                }
+                o << "]\n";
+            }
+            o << "_gp_contour = ax.contour(np.arange(len(_gp_contour_values[0])), "
+              << "np.arange(len(_gp_contour_values)), _gp_contour_values, "
+              << "levels=_gp_contour_levels, **_gp_contour_kwargs)\n";
         }
         // Place matrix labels at their gnuplot cell coordinates (column, row).
         // The numeric format and RGB condition are retained as plot data.

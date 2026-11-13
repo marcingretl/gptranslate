@@ -213,3 +213,9 @@ test('dyconn-heatmap', py, args: [meson.current_source_dir() / 'tests' / 'check_
 # Annotated heatmaps use plain matrix labels with enhanced-text font sizing,
 # in addition to the existing conditional-RGB matrix-label syntax.
 test('heatmap-numeric-matrix-labels', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_numeric_labels.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-numeric-matrix-labels.gp', meson.current_build_dir() / 'heatmap-numeric-matrix-labels.py'])
+
+# The heatmap package generates 2D contours through a flat matrix splot.
+test('heatmap-contour-2d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_contour.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-contour-func.gp', meson.current_build_dir() / 'heatmap-contour-func.py'])
+
+# Gnuplot line continuations are significant for multi-line RGB palettes.
+test('heatmap-multiline-palette', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_palette_continuation.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-multiline-palette.gp', meson.current_build_dir() / 'heatmap-multiline-palette.py'])
