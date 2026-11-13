@@ -492,6 +492,20 @@ void parse_tics(Tics& tics, const std::string& spec) {
         if (*tics.font_size <= 0)
             throw std::runtime_error("invalid tic font size");
     }
+    // The default gnuplot offset coordinates are character cells. Preserve
+    // both components separately: they move the labels, not the tick marks.
+    // Non-character coordinate systems require a different conversion.
+    static const std::regex tic_offset_re(
+        R"((?:^|\s)offset\s+(?:character\s+)?([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*,\s*([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?=\s|$))");
+    if (std::regex_search(spec, match, tic_offset_re)) {
+        const double dx = std::stod(match[1].str());
+        const double dy = std::stod(match[2].str());
+        if (!std::isfinite(dx) || !std::isfinite(dy))
+            throw std::runtime_error("invalid tic offset");
+        tics.label_offset = std::array<double, 2>{dx, dy};
+    }
+    if (std::regex_search(spec, std::regex(R"((?:^|\s)nooffset(?=\s|$))")))
+        tics.label_offset.reset();
     // `in` and `out` are mutually exclusive; later directives win.
     if (std::regex_search(spec, std::regex(R"((?:^|\s)in(?:\s|$))"))) {
         tics.outward = false;
@@ -521,6 +535,8 @@ void parse_tics(Tics& tics, const std::string& spec) {
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)format\s+(['"])(.*?)\1)"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)scale\s+[^\s]+)"), " ");
     rest = std::regex_replace(rest, font_re, " ");
+    rest = std::regex_replace(rest, tic_offset_re, " ");
+    rest = std::regex_replace(rest, std::regex(R"((?:^|\s)nooffset(?=\s|$))"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)in(?:\s|$))"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)out(?:\s|$))"), " ");
     // Mirroring is a per-axis property, not an unsupported tic modifier.
@@ -1078,6 +1094,8 @@ ParseResult parse(const std::string& source) {
                 const auto spec = trim(s.substr(std::string("set tics ").size()));
                 parse_tics(p->x.tics, spec);
                 parse_tics(p->y.tics, spec);
+                // Global tic settings also apply to the Z axis of a 3D plot.
+                parse_tics(p->z.tics, spec);
                 p->mirror_tics = p->x.tics.mirror && p->y.tics.mirror;
                 continue;
             }
@@ -1659,6 +1677,12 @@ ParseResult parse(const std::string& source) {
             }
             if (s == "unset pm3d") {
                 pm3d_surface = false;
+                continue;
+            }
+            // Standalone hidden3d removes hidden lines from wireframe splot
+            // surfaces, but does not affect filled pm3d surfaces in Gnuplot.
+            // The supported pm3d backend therefore needs no rendering change.
+            if (s == "set hidden3d" || s == "unset hidden3d") {
                 continue;
             }
             if (starts(s, "set dgrid3d ")) {

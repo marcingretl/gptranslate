@@ -143,6 +143,9 @@ test('boxplot-notches', py, args: [check, exe.full_path(), meson.current_source_
 # Real libgretl panplot --stack: bare noxlabel and six numeric y-tic intervals.
 test('panplot-stack', py, args: [meson.current_source_dir() / 'tests' / 'check_panplot_stack.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'panplot-stack.gp', meson.current_build_dir() / 'panplot-stack-test.py'])
 
+# Tick-label offsets retain character-space x/y shifts and nooffset resets.
+test('tics-offset', py, args: [meson.current_source_dir() / 'tests' / 'check_tics_offset.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'tics-offset.gp', meson.current_build_dir() / 'tics-offset.py'])
+
 # Numeric tic sequences from libgretl: incr, start,incr, and start,incr,end.
 test('tics-sequence', py, args: [meson.current_source_dir() / 'tests' / 'check_tics_sequence.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'tics-sequence.gp', meson.current_build_dir() / 'tics-sequence.py'])
 

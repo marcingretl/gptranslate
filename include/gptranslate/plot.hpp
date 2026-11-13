@@ -88,6 +88,8 @@ struct Tics {
     bool mirror{true};
     // Optional size requested by the gnuplot tic font modifier.
     std::optional<double> font_size;
+    // Gnuplot offsets tick-label text in character units along screen x/y.
+    std::optional<std::array<double, 2>> label_offset;
 };
 struct Axis {
     std::string label;

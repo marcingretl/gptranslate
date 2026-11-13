@@ -105,7 +105,8 @@ void emit_tics(std::ostringstream& o,
                const Tics& tics,
                const std::string& axis,
                const std::string& target,
-               bool unix_time = false) {
+               bool unix_time = false,
+               bool is_3d = false) {
     if (!tics.enabled && tics.format.empty()) {
         return;
     }
@@ -167,6 +168,28 @@ void emit_tics(std::ostringstream& o,
     }
     if (tics.major_scale && *tics.major_scale == 0)
         o << target << ".tick_params(axis='" << axis << "', length=0)\n";
+    if (tics.label_offset) {
+        const auto [dx, dy] = *tics.label_offset;
+        if (is_3d) {
+            // Axes3D recomputes 3D text positions and transforms on every
+            // draw, so only an approximate radial label pad is available.
+            // The exact independent screen-x/screen-y translation is retained
+            // in the IR for future 3D rendering improvements.
+            o << target << ".tick_params(axis='" << axis << "', pad="
+              << "7 + (0.6 * " << dx << " + " << dy
+              << ") * "
+              << (tics.font_size ? std::to_string(*tics.font_size)
+                                 : "plt.rcParams['font.size']") << ")\n";
+        } else {
+            // Gnuplot offsets label text in character cells; approximate one
+            // character width as 0.6 em and height as 1 em, in screen points.
+            o << "for _gp_tick_label in " << target << ".get_" << axis << "ticklabels():\n";
+            o << "    _gp_size = _gp_tick_label.get_fontsize()\n";
+            o << "    _gp_tick_label.set_transform(_gp_tick_label.get_transform() + "
+                 "ScaledTranslation(0.6 * " << dx << " * _gp_size / 72, "
+              << dy << " * _gp_size / 72, fig.dpi_scale_trans))\n";
+        }
+    }
 }
 std::string numbers(const std::vector<Point>& pts, bool x) {
     std::ostringstream o;
@@ -290,6 +313,7 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "matplotlib.use(" << pystr(backend_name_) << ")\n";
     }
     o << "import matplotlib.pyplot as plt\n";
+    o << "from matplotlib.transforms import ScaledTranslation\n";
     o << "from matplotlib.ticker import MultipleLocator, FixedLocator, "
          "FormatStrFormatter, NullFormatter, "
          "AutoMinorLocator\n";
@@ -434,6 +458,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "ax.set_zlim(bottom=" << *p.z.min << ")\n";
             if (p.z.max)
                 o << "ax.set_zlim(top=" << *p.z.max << ")\n";
+            // Surface plots also need the global/axis-specific tic settings.
+            // Labels are translated approximately because Axes3D overrides
+            // their display transforms during rendering.
+            emit_tics(o, p.x.tics, "x", "ax", false, true);
+            emit_tics(o, p.y.tics, "y", "ax", false, true);
+            emit_tics(o, p.z.tics, "z", "ax", false, true);
             continue;
         }
         for (const auto& image : p.images) {
