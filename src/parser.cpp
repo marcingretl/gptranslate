@@ -1609,8 +1609,7 @@ ParseResult parse(const std::string& source) {
                 static const std::regex isosamples_re(
                     R"(^set isosamples\s+([0-9]+)\s*(?:,\s*([0-9]+))?\s*$)");
                 std::smatch match;
-                if (!std::regex_match(s, match, isosamples_re) ||
-                    std::stoi(match[1].str()) < 2 ||
+                if (!std::regex_match(s, match, isosamples_re) || std::stoi(match[1].str()) < 2 ||
                     (match[2].matched && std::stoi(match[2].str()) < 2))
                     throw std::runtime_error("invalid isosamples directive: " + s);
                 continue;
@@ -1663,8 +1662,7 @@ ParseResult parse(const std::string& source) {
                     throw std::runtime_error("unknown contour data block: " + match[1].str());
                 ContourGrid contour;
                 contour.matrix = parse_matrix(block->second);
-                if (contour.matrix.rows.size() < 2 ||
-                    contour.matrix.rows[0].size() < 2)
+                if (contour.matrix.rows.size() < 2 || contour.matrix.rows[0].size() < 2)
                     throw std::runtime_error("contour matrix requires at least 2 x 2 cells");
                 contour.level_count = contour_level_count > 0 ? contour_level_count : 7;
                 contour.levels = contour_levels;
@@ -1672,18 +1670,16 @@ ParseResult parse(const std::string& source) {
                 // Retain the actual line colors already parsed globally.
                 if (contour_first_linetype > 0) {
                     const size_t count = contour_levels.empty()
-                                             ? static_cast<size_t>(contour.level_count)
-                                             : contour_levels.size();
+                                           ? static_cast<size_t>(contour.level_count)
+                                           : contour_levels.size();
                     for (size_t k = 0; k < count; ++k) {
                         const size_t index = static_cast<size_t>(contour_first_linetype - 1) + k;
-                        if (index < d.linetype_colors.size() &&
-                            !d.linetype_colors[index].empty())
+                        if (index < d.linetype_colors.size() && !d.linetype_colors[index].empty())
                             contour.colors.push_back(d.linetype_colors[index]);
                         else
                             break;
-                        contour.widths.push_back(index < d.linetype_widths.size()
-                                                     ? d.linetype_widths[index]
-                                                     : 1.5);
+                        contour.widths.push_back(
+                            index < d.linetype_widths.size() ? d.linetype_widths[index] : 1.5);
                     }
                 }
                 p->contours.push_back(std::move(contour));

@@ -51,12 +51,21 @@ std::string mpl_color(const std::string& color) {
         hex = color.substr(1);
     } else if (color.size() > 2 && color[0] == '0' && (color[1] == 'x' || color[1] == 'X')) {
         hex = color.substr(2);
+    } else if ((color.size() == 6 || color.size() == 8) &&
+               color.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) {
+        // Accept hexadecimal RGB/RGBA colors without a prefix.
+        hex = color;
     } else {
         // Translate gnuplot color names not recognized by matplotlib.
         if (color == "dark-green") {
             return "darkgreen";
         }
         return color;
+    }
+
+    // Remove a nested gnuplot hexadecimal prefix after '#'.
+    if (hex.size() > 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) {
+        hex.erase(0, 2);
     }
 
     // Accept hexadecimal RGB values up to six digits.
@@ -286,7 +295,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
          "AutoMinorLocator\n";
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
     // NumPy is only required for grid-based contour rendering.
-    if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty(); }))
+    if (std::any_of(
+            d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty(); }))
         o << "import numpy as np\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
     o << "from datetime import datetime, timezone\n";
@@ -407,7 +417,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             } else {
                 o << "_gp_contour_levels = [";
                 for (size_t i = 0; i < contour.levels.size(); ++i) {
-                    if (i) o << ", ";
+                    if (i)
+                        o << ", ";
                     o << std::setprecision(17) << contour.levels[i];
                 }
                 o << "]\n";
@@ -415,7 +426,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             if (!contour.colors.empty()) {
                 o << "_gp_contour_kwargs['colors'] = [";
                 for (size_t i = 0; i < contour.colors.size(); ++i) {
-                    if (i) o << ", ";
+                    if (i)
+                        o << ", ";
                     o << pystr(mpl_color(contour.colors[i]));
                 }
                 o << "]\n";
@@ -423,7 +435,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             if (!contour.widths.empty()) {
                 o << "_gp_contour_kwargs['linewidths'] = [";
                 for (size_t i = 0; i < contour.widths.size(); ++i) {
-                    if (i) o << ", ";
+                    if (i)
+                        o << ", ";
                     o << std::setprecision(17) << contour.widths[i];
                 }
                 o << "]\n";
@@ -443,12 +456,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "        if value != value:\n";
             o << "            continue\n";
             if (labels.conditional_color) {
-                o << "        color = '#" << labels.below_color << "' if value "
-                  << labels.comparison << " " << std::setprecision(17)
-                  << labels.threshold << " else '#" << labels.otherwise_color << "'\n";
+                // Normalize gnuplot colors before emitting Python color literals.
+                o << "        color = " << pystr(mpl_color(labels.below_color)) << " if value "
+                  << labels.threshold << " else " << pystr(mpl_color(labels.otherwise_color))
+                  << "\n";
             }
-            o << "        ax.text(column_index, row_index, " << pystr(labels.format)
-              << " % value";
+            o << "        ax.text(column_index, row_index, " << pystr(labels.format) << " % value";
             if (labels.conditional_color)
                 o << ", color=color";
             if (labels.font_size)
