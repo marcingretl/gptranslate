@@ -296,7 +296,7 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
     // NumPy is only required for grid-based contour rendering.
     if (std::any_of(
-            d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty(); }))
+            d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.contours.empty() || !p.surfaces.empty(); }))
         o << "import numpy as np\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
     o << "from datetime import datetime, timezone\n";
@@ -343,7 +343,7 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             const double width = outer_width * inset_width * p.size_x;
             const double height = outer_height * inset_height * p.size_y;
             o << "ax = fig.add_axes([" << left << "," << bottom << "," << width << "," << height
-              << "])\n";
+              << "]" << (!p.surfaces.empty() ? ", projection='3d'" : "") << ")\n";
         } else {
             // A skipped gridplot cell has no Plot, so use its explicit index.
             const auto cells =
@@ -351,6 +351,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             if (p.panel_index >= cells)
                 throw std::runtime_error("more plots than multiplot cells");
             o << "ax = axes[" << p.panel_index << "]\n";
+            if (!p.surfaces.empty()) {
+                // Replace only this panel with a 3D axis; 2D panels remain intact.
+                o << "ax.remove()\n";
+                o << "ax = fig.add_subplot(" << (d.multiplot ? d.rows : 1) << ", "
+                  << (d.multiplot ? d.cols : 1) << ", " << (p.panel_index + 1)
+                  << ", projection='3d')\n";
+                o << "axes[" << p.panel_index << "] = ax\n";
+            }
         }
         bool twin = false;
         // Gnuplot matrix coordinates start at (0, 0) in the bottom-left.
@@ -376,6 +384,57 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << ")";
             }
             o << "])\n";
+        }
+        if (!p.surfaces.empty()) {
+            // Grid indices become Gnuplot matrix coordinates; color encodes Z.
+            // This branch deliberately avoids all 2D-specific axis formatting.
+            for (const auto& surface : p.surfaces) {
+                o << "_gp_surface_z = np.asarray(" << matrix_numbers(surface.matrix)
+                  << ", dtype=float)\n";
+                o << "_gp_surface_y, _gp_surface_x = np.indices(_gp_surface_z.shape)\n";
+                o << "_gp_surface = ax.plot_surface(_gp_surface_x, _gp_surface_y, "
+                     "_gp_surface_z, linewidth=0, antialiased=True, cmap="
+                  << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                if (p.colors.min || p.colors.max) {
+                    o << ", norm=Normalize(vmin="
+                      << (p.colors.min ? std::to_string(*p.colors.min) : "None")
+                      << ", vmax="
+                      << (p.colors.max ? std::to_string(*p.colors.max) : "None") << ")";
+                }
+                o << ")\n";
+                if (p.colorbox) {
+                    o << "_gp_colorbar = fig.colorbar(_gp_surface, ax=ax, shrink=0.65)\n";
+                    if (!p.colors.label.empty())
+                        o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                }
+            }
+            o << "ax.set_title(" << pystr(p.title) << ")\n";
+            o << "ax.set_xlabel(" << pystr(p.x.label) << ")\n";
+            o << "ax.set_ylabel(" << pystr(p.y.label) << ")\n";
+            o << "ax.set_zlabel(" << pystr(p.z.label);
+            if (p.z.label_font_size)
+                o << ", fontsize=" << *p.z.label_font_size;
+            if (p.z.label_rotation)
+                o << ", rotation=" << *p.z.label_rotation;
+            o << ")\n";
+            if (p.z.label_rotation)
+                o << "ax.zaxis.set_rotate_label(False)\n";
+            // Approximate Gnuplot's view rotation in Matplotlib's azimuth frame.
+            o << "ax.view_init(elev=" << p.view_elevation.value_or(30.0)
+              << ", azim=" << (p.view_azimuth.value_or(60.0) - 90.0) << ")\n";
+            if (p.x.min)
+                o << "ax.set_xlim(left=" << *p.x.min << ")\n";
+            if (p.x.max)
+                o << "ax.set_xlim(right=" << *p.x.max << ")\n";
+            if (p.y.min)
+                o << "ax.set_ylim(bottom=" << *p.y.min << ")\n";
+            if (p.y.max)
+                o << "ax.set_ylim(top=" << *p.y.max << ")\n";
+            if (p.z.min)
+                o << "ax.set_zlim(bottom=" << *p.z.min << ")\n";
+            if (p.z.max)
+                o << "ax.set_zlim(top=" << *p.z.max << ")\n";
+            continue;
         }
         for (const auto& image : p.images) {
             o << "ax.imshow(" << matrix_numbers(image)

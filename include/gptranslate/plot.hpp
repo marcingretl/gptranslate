@@ -91,6 +91,8 @@ struct Tics {
 };
 struct Axis {
     std::string label;
+    // Optional gnuplot label styling, currently used for 3D z-axis labels.
+    std::optional<double> label_font_size, label_rotation;
     std::optional<double> min, max;
     bool log{false};
     double log_base{10.0};
@@ -104,6 +106,10 @@ struct ImageMatrix {
 // follow gnuplot's matrix pseudo-columns ($1, $2, $3).
 // Gnuplot `splot ... matrix with lines` can request contours viewed from
 // above. Keep this two-dimensional grid separate from 3D surfaces.
+// A matrix-valued pm3d surface; unlike flat contours, it requires a 3D axis.
+struct SurfaceGrid {
+    ImageMatrix matrix;
+};
 struct ContourGrid {
     ImageMatrix matrix;
     // A count requests automatic levels; an explicit vector uses exact values.
@@ -174,7 +180,9 @@ struct Plot {
     std::string title;
     // Zero-based cell in a multiplot layout; skipped cells have no Plot.
     std::size_t panel_index{0};
-    Axis x, y, x2, y2;
+    Axis x, y, x2, y2, z;
+    // True 3D view angles are independent of the flat `set view map` mode.
+    std::optional<double> view_elevation, view_azimuth;
     // Preserve gnuplot time-axis settings for backend conversion.
     bool xdata_time{false};
     std::string timefmt;
@@ -201,6 +209,8 @@ struct Plot {
     std::vector<Series> series;
     std::vector<ImageMatrix> images;
     std::vector<ContourGrid> contours;
+    // Render real 3D matrix surfaces separately from projected contours.
+    std::vector<SurfaceGrid> surfaces;
     std::vector<MatrixLabels> matrix_labels;
     ColorScale colors;
 };

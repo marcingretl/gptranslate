@@ -952,6 +952,8 @@ ParseResult parse(const std::string& source) {
     bool contour_base = false;
     bool contour_view_map = false;
     bool contour_surface = true;
+    // `set pm3d at s` enables filled 3D surfaces, not flat contour maps.
+    bool pm3d_surface = false;
     int contour_level_count = 0;
     int contour_first_linetype = 0;
     std::vector<double> contour_levels;
@@ -1363,7 +1365,7 @@ ParseResult parse(const std::string& source) {
                 // A gridplot layout may skip cells without creating a drawable plot.
                 // The current Plot is the empty placeholder for the next panel.
                 if (!d.multiplot || !multiplot_layout || !p->series.empty() || !p->images.empty() ||
-                    !p->contours.empty() || !p->matrix_labels.empty())
+                    !p->contours.empty() || !p->surfaces.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("set multiplot next requires an empty layout panel");
                 ++p->panel_index;
                 continue;
@@ -1387,7 +1389,7 @@ ParseResult parse(const std::string& source) {
             if (s == "unset multiplot") {
                 // A trailing configuration-only panel is not a drawable plot.
                 if (d.multiplot && d.plots.size() > 1 && p->series.empty() && p->images.empty() &&
-                    p->contours.empty() && p->matrix_labels.empty()) {
+                    p->contours.empty() && p->surfaces.empty() && p->matrix_labels.empty()) {
                     d.plots.pop_back();
                     p = &d.plots.back();
                 }
@@ -1397,7 +1399,7 @@ ParseResult parse(const std::string& source) {
                 // Reset plot settings for the next panel without discarding
                 // already parsed panels or document-level output settings.
                 if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                    !p->matrix_labels.empty())
+                    !p->surfaces.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("reset after plot data without a new panel");
                 // Reset the gnuplot settings, but preserve the grid cell selected
                 // by earlier plot commands and any set multiplot next skips.
@@ -1409,6 +1411,7 @@ ParseResult parse(const std::string& source) {
                 contour_base = false;
                 contour_view_map = false;
                 contour_surface = true;
+                pm3d_surface = false;
                 contour_level_count = 0;
                 contour_first_linetype = 0;
                 contour_levels.clear();
@@ -1444,6 +1447,13 @@ ParseResult parse(const std::string& source) {
                 p->y.label.clear();
                 continue;
             }
+            // Gnuplot 3D labels can specify font size and an explicit rotation.
+            if (s == "set nozlabel" || s == "unset zlabel") {
+                p->z.label.clear();
+                p->z.label_font_size.reset();
+                p->z.label_rotation.reset();
+                continue;
+            }
             if (s == "set noy2label" || s == "unset y2label") {
                 p->y2.label.clear();
                 continue;
@@ -1459,6 +1469,28 @@ ParseResult parse(const std::string& source) {
             }
             if (text_command(s, "set ylabel")) {
                 p->y.label = quoted(s.substr(10));
+                continue;
+            }
+            if (text_command(s, "set zlabel")) {
+                static const std::regex zlabel_re(
+                    R"GP(^set zlabel\s+(['"])(.*?)\1(?:\s+font\s+(['"])(.*?)\3)?(?:\s+rotate\s+by\s+(-?[0-9]+(?:\.[0-9]+)?))?\s*$)GP");
+                std::smatch match;
+                if (!std::regex_match(s, match, zlabel_re))
+                    throw std::runtime_error("unsupported zlabel directive: " + s);
+                p->z.label = match[2].str();
+                p->z.label_font_size.reset();
+                p->z.label_rotation.reset();
+                if (match[4].matched) {
+                    // A font specification such as ",12" sets the label size.
+                    static const std::regex font_size_re(R"(^(?:[^,]*),([0-9]+(?:\.[0-9]+)?)$)");
+                    std::smatch font_match;
+                    const std::string font = match[4].str();
+                    if (!std::regex_match(font, font_match, font_size_re))
+                        throw std::runtime_error("unsupported zlabel font: " + match[4].str());
+                    p->z.label_font_size = std::stod(font_match[1].str());
+                }
+                if (match[5].matched)
+                    p->z.label_rotation = std::stod(match[5].str());
                 continue;
             }
             if (text_command(s, "set y2label")) {
@@ -1603,6 +1635,44 @@ ParseResult parse(const std::string& source) {
                 contour_view_map = true;
                 continue;
             }
+            if (starts(s, "set view ")) {
+                // Preserve Gnuplot's elevation and azimuth for true 3D plots.
+                static const std::regex view_re(
+                    R"(^set view\s+(-?[0-9]+(?:\.[0-9]+)?)\s*,\s*(-?[0-9]+(?:\.[0-9]+)?)\s*$)");
+                std::smatch match;
+                if (!std::regex_match(s, match, view_re))
+                    throw std::runtime_error("unsupported 3D view: " + s);
+                p->view_elevation = std::stod(match[1].str());
+                p->view_azimuth = std::stod(match[2].str());
+                contour_view_map = false;
+                continue;
+            }
+            if (starts(s, "set pm3d")) {
+                // Only a surface-positioned pm3d mode is meaningful in this
+                // backend. Reject other modes rather than misrendering them.
+                static const std::regex pm3d_re(
+                    R"(^set pm3d(?: at s(?: hidden3d(?: [0-9]+)?)?)?\s*$)");
+                if (!std::regex_match(s, pm3d_re))
+                    throw std::runtime_error("unsupported pm3d mode: " + s);
+                pm3d_surface = true;
+                continue;
+            }
+            if (s == "unset pm3d") {
+                pm3d_surface = false;
+                continue;
+            }
+            if (starts(s, "set dgrid3d ")) {
+                // Named matrix blocks already provide a rectangular grid.
+                // Validate this directive, but do not regrid matrix values.
+                static const std::regex dgrid_re(
+                    R"(^set dgrid3d\s+([0-9]+)\s*,\s*([0-9]+)\s+qnorm\s+([0-9]+)\s*$)");
+                std::smatch match;
+                if (!std::regex_match(s, match, dgrid_re) ||
+                    std::stoi(match[1].str()) < 2 || std::stoi(match[2].str()) < 2 ||
+                    std::stoi(match[3].str()) < 1)
+                    throw std::runtime_error("unsupported dgrid3d directive: " + s);
+                continue;
+            }
             // `isosamples` controls function sampling in gnuplot. An explicit
             // matrix supplies its own grid, so there is nothing to resample.
             if (starts(s, "set isosamples ")) {
@@ -1649,6 +1719,28 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "splot ")) {
+                // True 3D pm3d surfaces are represented separately from the
+                // existing contour-map interpretation of `splot`.
+                static const std::regex surface_plot_re(
+                    R"(^splot\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s+matrix\s+with\s+pm3d\s*$)");
+                std::smatch surface_match;
+                if (std::regex_match(s, surface_match, surface_plot_re)) {
+                    if (!pm3d_surface || contour_view_map)
+                        throw std::runtime_error("unsupported 3D splot: " + s);
+                    // A mixed 2D/3D panel must not silently discard either layer.
+                    if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
+                        !p->matrix_labels.empty())
+                        throw std::runtime_error("mixed 2D and 3D plot is unsupported");
+                    const auto block = d.data_blocks.find(surface_match[1].str());
+                    if (block == d.data_blocks.end())
+                        throw std::runtime_error("unknown 3D data block: " + surface_match[1].str());
+                    SurfaceGrid surface;
+                    surface.matrix = parse_matrix(block->second);
+                    if (surface.matrix.rows.size() < 2 || surface.matrix.rows[0].size() < 2)
+                        throw std::runtime_error("3D surface requires at least 2 x 2 cells");
+                    p->surfaces.push_back(std::move(surface));
+                    continue;
+                }
                 // Only an explicitly requested flat contour view is supported
                 // at this stage; pm3d and arbitrary 3D data remain errors.
                 static const std::regex contour_plot_re(
@@ -1657,6 +1749,9 @@ ParseResult parse(const std::string& source) {
                 if (!contour_base || !contour_view_map || contour_surface ||
                     !std::regex_match(s, match, contour_plot_re))
                     throw std::runtime_error("unsupported 3D splot: " + s);
+                // Contour plots use 2D axes and cannot share a 3D surface panel.
+                if (!p->surfaces.empty())
+                    throw std::runtime_error("mixed 2D and 3D plot is unsupported");
                 const auto block = d.data_blocks.find(match[1].str());
                 if (block == d.data_blocks.end())
                     throw std::runtime_error("unknown contour data block: " + match[1].str());
@@ -1720,6 +1815,10 @@ ParseResult parse(const std::string& source) {
             }
             if (std::regex_search(s, std::regex(R"(^set xrange\s*\[)"))) {
                 set_range(p->x, s);
+                continue;
+            }
+            if (std::regex_search(s, std::regex(R"(^set zrange\s*\[)"))) {
+                set_range(p->z, s);
                 continue;
             }
             if (std::regex_search(s, std::regex(R"(^set yrange\s*\[)"))) {
@@ -1830,7 +1929,8 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "plot ")) {
-                if (!p->series.empty() || !p->images.empty() || !p->contours.empty()) {
+                if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
+                    !p->surfaces.empty()) {
                     const auto panel_index = p->panel_index;
                     d.plots.emplace_back();
                     p = &d.plots.back();
@@ -2229,6 +2329,7 @@ ParseResult parse(const std::string& source) {
                     next.series.clear();
                     next.images.clear();
                     next.contours.clear();
+                    next.surfaces.clear();
                     next.matrix_labels.clear();
                     d.plots.push_back(std::move(next));
                     p = &d.plots.back();
