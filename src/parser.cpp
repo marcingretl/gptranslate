@@ -1485,11 +1485,14 @@ ParseResult parse(const std::string& source) {
                 p->autoscale_fix = true;
                 continue;
             }
-            if (s == "set link x") {
+            // A bare link uses the identity mapping between the primary and
+            // secondary axes; explicit `via ... inverse ...` mappings remain
+            // unsupported until the transformation is represented in the IR.
+            if (s == "set link x" || s == "set link x2") {
                 p->link_x = true;
                 continue;
             }
-            if (s == "set link y") {
+            if (s == "set link y" || s == "set link y2") {
                 p->link_y = true;
                 continue;
             }
