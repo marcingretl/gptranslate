@@ -209,3 +209,7 @@ test('pairplot-compat', py, args: [meson.current_source_dir() / 'tests' / 'check
 
 # DYconn/heatmap uses a global tick style and resets the palette colorbar.
 test('dyconn-heatmap', py, args: [meson.current_source_dir() / 'tests' / 'check_dyconn_heatmap.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'dyconn-heatmap.gp', meson.current_build_dir() / 'dyconn-heatmap.py'])
+
+# Annotated heatmaps use plain matrix labels with enhanced-text font sizing,
+# in addition to the existing conditional-RGB matrix-label syntax.
+test('heatmap-numeric-matrix-labels', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_numeric_labels.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-numeric-matrix-labels.gp', meson.current_build_dir() / 'heatmap-numeric-matrix-labels.py'])

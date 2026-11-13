@@ -323,28 +323,50 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
 }
 // Parse matrix labels with gnuplot pseudo-columns, sprintf formatting and
 // a conditional RGB text color. Unsupported expressions remain errors.
+// Some libgretl scripts also place plain numeric annotations with
+// enhanced-text sizing (e.g. {/=12 \%.1f}).
 MatrixLabels parse_matrix_labels(const std::string& spec, const std::vector<std::string>& rows) {
     // The four using expressions correspond to x, y, label and text color.
     // Whitespace is accepted around operators, without matching a plot name.
-    static const std::regex expression(
-        // Also accept libgretl's NaN guard: $3!=$3 ? "" : sprintf(...).
+    // Also accept libgretl's NaN guard: $3!=$3 ? "" : sprintf(...).
+    static const std::regex colored_expression(
         R"GP(^\$[A-Za-z_][A-Za-z0-9_]*\s+matrix\s+using\s+1\s*:\s*2\s*:\s*\(\s*(?:\$3\s*!=\s*\$3\s*\?\s*(?:""|'')\s*:\s*)?sprintf\s*\(\s*([\"'])(%[^\"']+)\1\s*,\s*\$3\s*\)\s*\)\s*:\s*\(\s*\$3\s*(<|<=|>|>=)\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\?\s*(0x[0-9a-fA-F]{6})\s*:\s*(0x[0-9a-fA-F]{6})\s*\)\s+with\s+labels\s+tc\s+rgb\s+var\s*$)GP");
-    std::smatch match;
-    if (!std::regex_match(spec, match, expression))
-        throw std::runtime_error("unsupported matrix plot expression: " + spec);
-    MatrixLabels labels;
-    labels.matrix = parse_matrix(rows);
-    labels.format = match[2].str();
-    // Python's %-formatting handles standard numeric printf formats.
+    // Simpler heatmap form: no conditional color, optional enhanced-text sizing.
+    static const std::regex simple_expression(
+        R"GP(^\$[A-Za-z_][A-Za-z0-9_]*\s+matrix\s+using\s+1\s*:\s*2\s*:\s*\(\s*sprintf\s*\(\s*([\"'])(.*?)\1\s*,\s*\$3\s*\)\s*\)\s+with\s+labels\s*$)GP");
+    static const std::regex enhanced_size(R"GP(^\{/=\s*([0-9]+)\s+(.+)\}$)GP");
     static const std::regex numeric_format(R"(^%[-+ #0]*[0-9]*(?:\.[0-9]+)?[eEfFgG]$)");
+
+    std::smatch match;
+    MatrixLabels labels;
+    if (std::regex_match(spec, match, colored_expression)) {
+        labels.format = match[2].str();
+        labels.conditional_color = true;
+        labels.comparison = match[3].str();
+        labels.threshold = std::stod(match[4].str());
+        labels.below_color = match[5].str().substr(2);
+        labels.otherwise_color = match[6].str().substr(2);
+        // Normalize the condition to a less-than comparison by swapping colors
+        // where possible. The operator is stored separately below instead.
+    } else if (std::regex_match(spec, match, simple_expression)) {
+        labels.format = match[2].str();
+        std::smatch font_match;
+        if (std::regex_match(labels.format, font_match, enhanced_size)) {
+            labels.font_size = std::stoi(font_match[1].str());
+            labels.format = font_match[2].str();
+        }
+        // The escape before % belongs to gnuplot's enhanced-text syntax,
+        // not to the numeric format used by Python's %-formatter.
+        while (!labels.format.empty() && labels.format.front() == '\\')
+            labels.format.erase(0, 1);
+    } else {
+        throw std::runtime_error("unsupported matrix plot expression: " + spec);
+    }
+
+    // Python's %-formatting handles standard numeric printf formats.
     if (!std::regex_match(labels.format, numeric_format))
         throw std::runtime_error("unsupported numeric label format: " + labels.format);
-    labels.threshold = std::stod(match[4].str());
-    labels.below_color = match[5].str().substr(2);
-    labels.otherwise_color = match[6].str().substr(2);
-    // Normalize the condition to a less-than comparison by swapping colors
-    // where possible. The operator is stored separately below instead.
-    labels.comparison = match[3].str();
+    labels.matrix = parse_matrix(rows);
     return labels;
 }
 // Parse gnuplot's piecewise RGB palette. Stops can use named colors or

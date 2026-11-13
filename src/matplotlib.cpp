@@ -387,17 +387,26 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         }
         // Place matrix labels at their gnuplot cell coordinates (column, row).
         // The numeric format and RGB condition are retained as plot data.
+        // Conditional RGB styles and optional enhanced-text font sizes remain
+        // independent: ordinary numeric annotations inherit Matplotlib's color.
         for (const auto& labels : p.matrix_labels) {
             o << "for row_index, values in enumerate(" << matrix_numbers(labels.matrix) << "):\n";
             o << "    for column_index, value in enumerate(values):\n";
             // Suppress missing-cell labels in triangular correlation plots.
             o << "        if value != value:\n";
             o << "            continue\n";
-            o << "        color = '#" << labels.below_color << "' if value " << labels.comparison
-              << " " << std::setprecision(17) << labels.threshold << " else '#"
-              << labels.otherwise_color << "'\n";
+            if (labels.conditional_color) {
+                o << "        color = '#" << labels.below_color << "' if value "
+                  << labels.comparison << " " << std::setprecision(17)
+                  << labels.threshold << " else '#" << labels.otherwise_color << "'\n";
+            }
             o << "        ax.text(column_index, row_index, " << pystr(labels.format)
-              << " % value, color=color, ha='center', va='center')\n";
+              << " % value";
+            if (labels.conditional_color)
+                o << ", color=color";
+            if (labels.font_size)
+                o << ", fontsize=" << *labels.font_size;
+            o << ", ha='center', va='center')\n";
         }
         // Analytic functions may precede inline data in a single gnuplot plot
         // command. Determine their x domain from all plotted data series rather

@@ -105,6 +105,10 @@ struct ImageMatrix {
 struct MatrixLabels {
     ImageMatrix matrix;
     std::string format;
+    // Optional gnuplot enhanced-text size (e.g. {/=12 \%.1f}).
+    std::optional<int> font_size;
+    // Only conditional `tc rgb var` labels compute their color per cell.
+    bool conditional_color{false};
     double threshold{};
     std::string comparison;
     std::string below_color, otherwise_color;
