@@ -1431,18 +1431,20 @@ ParseResult parse(const std::string& source) {
             }
             // Axis tic definitions and secondary-axis tic intervals are general plot
             // settings.
-            if (starts(s, "set xtics ")) {
+            // Gnuplot accepts tic lists both with and without a space before
+            // the opening parenthesis, as emitted by the ghosts package.
+            if (starts(s, "set xtics ") || starts(s, "set xtics(")) {
                 p->xtics_disabled = false;
-                parse_tics(p->x.tics, trim(s.substr(10)));
+                parse_tics(p->x.tics, trim(s.substr(std::string("set xtics").size())));
                 continue;
             }
-            if (starts(s, "set ytics ")) {
+            if (starts(s, "set ytics ") || starts(s, "set ytics(")) {
                 p->ytics_disabled = false;
-                parse_tics(p->y.tics, trim(s.substr(10)));
+                parse_tics(p->y.tics, trim(s.substr(std::string("set ytics").size())));
                 continue;
             }
-            if (starts(s, "set x2tics ")) {
-                parse_tics(p->x2.tics, trim(s.substr(11)));
+            if (starts(s, "set x2tics ") || starts(s, "set x2tics(")) {
+                parse_tics(p->x2.tics, trim(s.substr(std::string("set x2tics").size())));
                 continue;
             }
             if (s == "set y2tics") {
@@ -1450,8 +1452,8 @@ ParseResult parse(const std::string& source) {
                 p->y2.tics.enabled = true;
                 continue;
             }
-            if (starts(s, "set y2tics ")) {
-                parse_tics(p->y2.tics, trim(s.substr(11)));
+            if (starts(s, "set y2tics ") || starts(s, "set y2tics(")) {
+                parse_tics(p->y2.tics, trim(s.substr(std::string("set y2tics").size())));
                 continue;
             }
             if (starts(s, "set mxtics ")) {
