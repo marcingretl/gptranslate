@@ -107,6 +107,10 @@ foreach name : ['pip', 'msd', 'mpd', 'cdf']
   test('bace-' + name, py, args: [check, exe.full_path(), meson.current_source_dir() / 'tests' / ('bace-' + name + '.gp'), meson.current_build_dir() / ('bace-' + name + '-test.py')])
 endforeach
 
+# BACE custom-prior bar charts reuse a named block via an empty source ('').
+# Execute the clustered histogram to verify both category labels and bar values.
+test('bace-prior-histogram', py, args: [meson.current_source_dir() / 'tests' / 'check_bace_prior_histogram.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'bace-prior-pip-histogram.gp', meson.current_build_dir() / 'bace-prior-pip-histogram.py'])
+
 # Execute the BACE PIP script with a headless Matplotlib backend so that
 # invalid palette color names cannot pass syntax-only translation tests.
 test('bace-pip-runtime', py, args: [meson.current_source_dir() / 'tests' / 'check_palette_runtime.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'bace-pip.gp', meson.current_build_dir() / 'bace-pip-runtime.py'])

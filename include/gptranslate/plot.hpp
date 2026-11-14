@@ -217,6 +217,11 @@ struct Plot {
     double fill_alpha{1.0};
     // Gnuplot rowstacked histograms accumulate each row across series.
     bool histogram_rowstacked{false};
+    // Clustered histograms place each series side by side within a category.
+    bool histogram_clustered{false};
+    double histogram_gap{1.0};
+    // Category labels are sourced from using ...:xtic(N), not numeric x data.
+    std::vector<std::string> histogram_categories;
     // Optional gnuplot box width: relative to point spacing or absolute x units.
     std::optional<double> box_width;
     bool box_width_relative{false};

@@ -687,6 +687,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         std::string last_line_color;
         // Separate positive and negative stacking bases for histogram series.
         o << "_hist_positive = {}\n_hist_negative = {}\n";
+        const auto histogram_count = std::count_if(p.series.begin(), p.series.end(),
+            [](const Series& s) { return s.style == Style::Histograms; });
+        // Each clustered histogram series has its own bar slot within each x.
+        o << "_gp_hist_series = 0\n";
         for (const auto& s : p.series) {
             if (s.yaxis == 2 && !twin) {
                 o << "ax2 = ax.twinx()\n";
@@ -913,7 +917,16 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 case Style::Histograms: {
                     // Rowstacked histograms accumulate contributions at each row index.
                     o << "kw.pop('linewidth', None)\n";
-                    if (p.histogram_rowstacked) {
+                    if (p.histogram_clustered) {
+                        const double slot = p.box_width.value_or(0.9) /
+                                            (static_cast<double>(histogram_count) + p.histogram_gap);
+                        o << "_gp_hist_width = " << std::setprecision(17) << slot << "\n";
+                        o << "_gp_hist_x = [v + (_gp_hist_series - (" << histogram_count
+                          << " - 1)/2.0) * _gp_hist_width for v in x]\n";
+                        o << "target.bar(_gp_hist_x, y, width=_gp_hist_width*0.95, alpha="
+                          << p.fill_alpha << ", zorder=1, **kw)\n";
+                        o << "_gp_hist_series += 1\n";
+                    } else if (p.histogram_rowstacked) {
                         o << "_hist_bottom = [_hist_positive.get(v, 0.0) if h >= 0 "
                              "else _hist_negative.get(v, 0.0) for v, h in zip(x, y)]\n";
                         o << "target.bar(x, y, bottom=_hist_bottom, width=0.8, alpha="
@@ -1120,6 +1133,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // Apply named ticks to primary axes. Secondary x/y tic axes are
         // independent.
         emit_tics(o, p.x.tics, "x", "ax", p.xdata_time && p.timefmt == "%s");
+        if (!p.histogram_categories.empty()) {
+            // xtic(N) supplies category text, while histogram x coordinates
+            // are zero-based row indices. Do not apply a numeric x locator.
+            o << "ax.set_xticks(list(range(" << p.histogram_categories.size() << ")))\n";
+            o << "ax.set_xticklabels([";
+            for (size_t j = 0; j < p.histogram_categories.size(); ++j) {
+                if (j) o << ", ";
+                o << pystr(p.histogram_categories[j]);
+            }
+            o << "], rotation=" << p.x.tics.rotation << ")\n";
+        }
         emit_tics(o, p.y.tics, "y", "ax");
         if (p.mxtics > 1) {
             o << "ax.xaxis.set_minor_locator(AutoMinorLocator(" << p.mxtics << "))\n";

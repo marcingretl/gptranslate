@@ -622,6 +622,9 @@ void parse_tics(Tics& tics, const std::string& spec) {
         tics.mirror = true;
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)nomirror(?:\s|$))"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)mirror(?:\s|$))"), " ");
+    // Gnuplot accepts these layout modifiers for category-axis labels;
+    // Matplotlib already uses border ticks and automatic text justification.
+    rest = std::regex_replace(rest, std::regex(R"((?:^|\s)(?:border|autojustify)(?=\s|$))"), " ");
     rest = std::regex_replace(rest, numeric_tics_re, " ");
     if (!trim(rest).empty()) {
         throw std::runtime_error("unsupported tic modifier: " + trim(rest));
@@ -966,7 +969,7 @@ ParseResult parse(const std::string& source) {
     // Keep numbered parametric definitions across successive plot commands.
     std::map<std::string, std::array<double, 3>> parametric_functions;
     std::pair<double, double> trange{-5.0, 5.0};
-    std::string previous_file;
+    std::string previous_source;
     std::map<std::string, std::vector<std::string>> external_data;
     // Keep scalar definitions local and in source order. The conditional pass
     // selects active lines; this pass resolves values at each plot command.
@@ -1567,7 +1570,9 @@ ParseResult parse(const std::string& source) {
             }
             // Gnuplot's default data style applies when a plot item has no `with`
             // clause.
-            if (s == "set style data histogram") {
+            // Both spellings are accepted by gnuplot, including the plural form
+            // emitted by BACE for grouped prior/posterior inclusion probabilities.
+            if (s == "set style data histogram" || s == "set style data histograms") {
                 default_style = Style::Histograms;
                 continue;
             }
@@ -1577,6 +1582,20 @@ ParseResult parse(const std::string& source) {
             }
             if (s == "set style histogram rowstacked") {
                 p->histogram_rowstacked = true;
+                p->histogram_clustered = false;
+                continue;
+            }
+            if (starts(s, "set style histogram clustered")) {
+                // BACE uses `gap 1 title textcolor lt -1`. The title textcolor
+                // is inherited from the legend; reject unsupported variants.
+                static const std::regex clustered_re(
+                    R"(^set style histogram clustered(?: gap ([0-9]+(?:\.[0-9]+)?))?(?: title textcolor lt -1)?$)");
+                std::smatch match;
+                if (!std::regex_match(s, match, clustered_re))
+                    throw std::runtime_error("unsupported clustered histogram style: " + s);
+                p->histogram_clustered = true;
+                p->histogram_rowstacked = false;
+                p->histogram_gap = match[1].matched ? std::stod(match[1].str()) : 1.0;
                 continue;
             }
             if (starts(s, "set encoding ") || starts(s, "set termoption ") ||
@@ -2107,9 +2126,9 @@ ParseResult parse(const std::string& source) {
                         left = true;
                     else if (token == "right")
                         right = true;
-                    else if (token == "top")
+                    else if (token == "top" || token == "above")
                         top = true;
-                    else if (token == "bottom")
+                    else if (token == "bottom" || token == "below")
                         bottom = true;
                     else if (token == "center") {
                         // Center is the default for an unspecified dimension.
@@ -2192,17 +2211,17 @@ ParseResult parse(const std::string& source) {
                     if (parametric && std::regex_match(src, parametric_y))
                         throw std::runtime_error("parametric y(t) without preceding x(t): " + spec);
                     has_ordinary_sources = true;
-                    // Empty quoted filenames reuse the preceding external plot source.
+                    // Empty quoted sources reuse the preceding data file or named block.
                     if (src == "''" || src == "\"\"") {
-                        if (previous_file.empty())
-                            throw std::runtime_error("no previous data file for empty source");
-                        src = previous_file;
+                        if (previous_source.empty())
+                            throw std::runtime_error("no previous data source for empty source");
+                        src = previous_source;
                     }
                     const bool file_source = src.size() >= 2 &&
                                              (src.front() == '\'' || src.front() == '"') &&
                                              src.back() == src.front();
                     if (file_source)
-                        previous_file = src;
+                        previous_source = src;
                     const bool inline_data = src == "'-'" || src == "\"-\"" || src == "-";
                     // Named sources reuse the same column interpretation as inline data.
                     // Named sources can contain either ordinary columns or a numeric
@@ -2256,6 +2275,8 @@ ParseResult parse(const std::string& source) {
                         auto found = d.data_blocks.find(src);
                         if (found != d.data_blocks.end()) {
                             named_rows = &found->second;
+                            // Gnuplot's '' source reuses named blocks as well as files.
+                            previous_source = src;
                         } else if (file_source) {
                             // Cache file rows: `''` must read exactly the same dataset.
                             auto cached = external_data.find(src);
@@ -2448,10 +2469,24 @@ ParseResult parse(const std::string& source) {
                                   ? 1
                                   : using_col(spec, 1, true);
                     // Histograms use the row number as x; `using 2` selects only the
-                    // height.
-                    if (ser.style == Style::Histograms)
+                    // height. `using 2:xtic(1)` also provides category labels.
+                    int category_col = 0;
+                    if (ser.style == Style::Histograms) {
                         xcol = 0;
+                        if (has_using) {
+                            const auto tail = trim(spec.substr(*using_pos));
+                            static const std::regex category_re(
+                                R"(^(?:\d+)\s*:\s*xtic(?:labels)?\(\s*(\d+)\s*\)(?:\s|$))");
+                            std::smatch category_match;
+                            if (std::regex_search(tail, category_match, category_re))
+                                category_col = std::stoi(category_match[1].str());
+                            else if (tail.find("xtic(") != std::string::npos ||
+                                     tail.find("xticlabels(") != std::string::npos)
+                                throw std::runtime_error("unsupported histogram xtic: " + spec);
+                        }
+                    }
                     auto ycol = (filled || using_expr || candle) ? 2 : using_col(spec, 2, false);
+                    const bool record_categories = category_col > 0 && p->histogram_categories.empty();
                     size_t row = 0;
                     bool ended = false;
                     size_t named_index = 0;
@@ -2482,6 +2517,13 @@ ParseResult parse(const std::string& source) {
                             cells.push_back(cell);
                         if (cells.empty()) {
                             continue;
+                        }
+                        if (record_categories) {
+                            // The first column may be a quoted category name or
+                            // a numeric ID. Preserve its original text for xtics.
+                            const auto index = static_cast<size_t>(category_col - 1);
+                            p->histogram_categories.push_back(
+                                index < cells.size() ? unquote(cells[index]) : "");
                         }
                         auto x = xcol == 0 ? std::optional<double>(static_cast<double>(row))
                                            : ((size_t)xcol <= cells.size() ? number(cells[xcol - 1])
@@ -2565,6 +2607,7 @@ ParseResult parse(const std::string& source) {
                     // Advance the layout cursor after each plotted panel.
                     ++next.panel_index;
                     next.series.clear();
+                    next.histogram_categories.clear();
                     next.images.clear();
                     next.contours.clear();
                     next.surfaces.clear();
