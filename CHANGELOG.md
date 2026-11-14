@@ -2,23 +2,10 @@
 
 ## Unreleased
 
-- Extended contributed-package plotting coverage for `gnuplot_piechart`,
-  `candlesticks` and `SankeyPlot`: restricted scalar arithmetic and chained
-  assignments, screen/graph pie sectors and labels, Gnuplot `set format`
-  parentheses and SI tick prefixes, six-field candlestick palette conditionals,
-  palette-colored volume bars, translucent object rectangles, and sampled
-  cubic-polynomial Sankey ribbons. Added four Agg rendering regressions.
-  Geometry and colors remain approximate where Gnuplot and Matplotlib use
-  different layout/terminal semantics.
-
-- Added support for the `color_xy` package's palette-colored `splot` with
-  `set view map`: a third numeric column now colors XY lines and points,
-  including `linespoints` and the corresponding colorbar. `set palette
-  negative` reverses either a defined or the default Matplotlib palette;
-  `set palette positive` and bare `set palette` restore forward mapping.
-  Added a headless regression covering color direction, segment coordinates,
-  marker values, normalization and colorbar presence. The built-in palette
-  remains an approximation of gnuplot's default colors.
+- Fixed correspondence-analysis label parsing for `font",10"center`
+  and `center tc rgb` modifiers, including labels without whitespace
+  between font and alignment. Matplotlib now preserves per-label font size,
+  centering and RGB text color. Added a headless label-geometry regression.
 
 - Improved `gridplot` compatibility with `set multiplot next` for skipped cells and
   figure-level titles in `set multiplot layout ... title ...`. The parser preserves
@@ -60,3 +47,9 @@ First public, experimental release.
 - Automatic contrasting colors for multi-series plots, with opt-out.
 
 Earlier development milestones (0.4–0.11.11) were internal iterations before this public release. See Git history for details when available.
+
+- Extend contributed-package compatibility for kddensity's gridded inline
+  XYZ contour and pm3d map output, including `unset ztics`, bare
+  `set contour`, `set dgrid3d X,Y`, and `set view map scale S`.
+- Preserve positive `set size ratio R` as a Matplotlib axes-box ratio
+  for correspondence-analysis biplots, independently of `ratio -1`.

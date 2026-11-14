@@ -91,7 +91,7 @@ struct Tics {
     bool direction_explicit{false};
     bool mirror{true};
     // Optional size requested by the gnuplot tic font modifier.
-    std::optional<double> font_size;
+    std::optional<double> font_size{};
     // Gnuplot offsets tick-label text in character units along screen x/y.
     std::optional<std::array<double, 2>> label_offset;
 };
@@ -122,6 +122,11 @@ struct SurfaceGrid {
 };
 struct ContourGrid {
     ImageMatrix matrix;
+    // Scattered XYZ input can be interpolated onto a regular map grid.
+    std::vector<std::array<double, 3>> xyz_points;
+    std::optional<std::array<int, 3>> dgrid3d;
+    // With pm3d and map view, render filled cells instead of contour lines.
+    bool filled_map{false};
     // A count requests automatic levels; an explicit vector uses exact values.
     int level_count{0};
     std::vector<double> levels;
@@ -179,6 +184,8 @@ struct Plot {
         std::string point_color{};
         // `tc rgb` applies to label text independently of point markers.
         std::string text_color{};
+        // Per-label gnuplot `font ",10"` overrides the default text size.
+        std::optional<double> font_size{};
     };
     std::vector<Label> labels;
     struct CircleSector {
@@ -210,6 +217,9 @@ struct Plot {
     bool square{false};
     // `set size ratio -1` makes x and y data units equally long.
     bool equal_units{false};
+    // A positive `set size ratio` specifies axes height/width in screen units.
+    std::optional<double> box_aspect_ratio;
+    bool ztics_disabled{false};
     // Gnuplot multiplot placement, normalized to the figure dimensions.
     double origin_x{0.0}, origin_y{0.0};
     double size_x{1.0}, size_y{1.0};

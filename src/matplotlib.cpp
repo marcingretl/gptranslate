@@ -591,6 +591,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             emit_tics(o, p.x.tics, "x", "ax", false, true);
             emit_tics(o, p.y.tics, "y", "ax", false, true);
             emit_tics(o, p.z.tics, "z", "ax", false, true);
+            if (p.ztics_disabled)
+                o << "ax.set_zticks([])\n";
             continue;
         }
         for (const auto& image : p.images) {
@@ -682,7 +684,63 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // projected 3D surface. Matrix row and column indices are gnuplot's
         // XY coordinates. Matplotlib computes the level curves from the grid.
         for (const auto& contour : p.contours) {
-            o << "_gp_contour_values = " << matrix_numbers(contour.matrix) << "\n";
+            if (!contour.xyz_points.empty()) {
+                // Gnuplot's dgrid3d interpolates the XYZ samples in data-space.
+                // Preserve actual x/y coordinates rather than matrix indices.
+                const auto [nx, ny, norm] = *contour.dgrid3d;
+                o << "_gp_xyz = np.asarray([";
+                o << std::setprecision(17);
+                for (size_t k = 0; k < contour.xyz_points.size(); ++k) {
+                    if (k)
+                        o << ", ";
+                    const auto& xyz = contour.xyz_points[k];
+                    o << "[" << xyz[0] << ", " << xyz[1] << ", " << xyz[2] << "]";
+                }
+                o << "], dtype=float)\n";
+                o << "_gp_map_x, _gp_map_y = np.meshgrid(np.linspace(_gp_xyz[:,0].min(), "
+                     "_gp_xyz[:,0].max(), "
+                  << nx
+                  << "), np.linspace(_gp_xyz[:,1].min(), "
+                     "_gp_xyz[:,1].max(), "
+                  << ny << "))\n";
+                o << "_gp_dx = np.abs(_gp_map_x[...,None] - _gp_xyz[:,0])\n";
+                o << "_gp_dy = np.abs(_gp_map_y[...,None] - _gp_xyz[:,1])\n";
+                o << "_gp_dist = _gp_dx**" << norm << " + _gp_dy**" << norm << "\n";
+                o << "_gp_weights = np.divide(1., _gp_dist, out=np.zeros_like(_gp_dist), "
+                     "where=_gp_dist>0)\n";
+                o << "_gp_den = _gp_weights.sum(axis=2)\n";
+                o << "_gp_contour_values = np.divide("
+                     "np.sum(_gp_weights * _gp_xyz[:,2], axis=2), _gp_den, "
+                     "out=np.full(_gp_den.shape, np.nan), where=_gp_den>0)\n";
+                o << "_gp_exact = (_gp_dist == 0)\n";
+                o << "_gp_contour_values = np.where(_gp_exact.any(axis=2), "
+                     "_gp_xyz[:,2][np.argmax(_gp_exact, axis=2)], _gp_contour_values)\n";
+            } else {
+                o << "_gp_contour_values = " << matrix_numbers(contour.matrix) << "\n";
+            }
+            if (contour.filled_map) {
+                o << "_gp_map = ax.pcolormesh(_gp_map_x, _gp_map_y, "
+                     "_gp_contour_values, shading='auto', cmap="
+                  << (p.colors.stops.empty() && !p.colors.negative ? "'viridis'" : "cmap");
+                if (p.colors.min || p.colors.max) {
+                    o << ", norm=Normalize(vmin="
+                      << (p.colors.min ? std::to_string(*p.colors.min) : "None")
+                      << ", vmax=" << (p.colors.max ? std::to_string(*p.colors.max) : "None")
+                      << ")";
+                }
+                o << ")\n";
+                if (p.colorbox) {
+                    if (p.colorbox_position) {
+                        const auto& rect = *p.colorbox_position;
+                        o << "_gp_manual_colorbars.append((_gp_map, (" << rect[0] << ", " << rect[1]
+                          << ", " << rect[2] << ", " << rect[3] << "), " << pystr(p.colors.label)
+                          << "))\n";
+                    } else {
+                        o << "_gp_colorbar = fig.colorbar(_gp_map, ax=ax)\n";
+                    }
+                }
+                continue;
+            }
             o << "_gp_contour_kwargs = {}\n";
             if (!contour.colors.empty() && contour.levels.empty()) {
                 // Use fixed interior levels when a named linetype palette must
@@ -721,9 +779,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 }
                 o << "]\n";
             }
-            o << "_gp_contour = ax.contour(np.arange(len(_gp_contour_values[0])), "
-              << "np.arange(len(_gp_contour_values)), _gp_contour_values, "
-              << "levels=_gp_contour_levels, **_gp_contour_kwargs)\n";
+            if (!contour.xyz_points.empty()) {
+                o << "_gp_contour = ax.contour(_gp_map_x, _gp_map_y, "
+                     "_gp_contour_values, levels=_gp_contour_levels, **_gp_contour_kwargs)\n";
+            } else {
+                o << "_gp_contour = ax.contour(np.arange(len(_gp_contour_values[0])), "
+                     "np.arange(len(_gp_contour_values)), _gp_contour_values, "
+                     "levels=_gp_contour_levels, **_gp_contour_kwargs)\n";
+            }
         }
         // Place matrix labels at their gnuplot cell coordinates (column, row).
         // The numeric format and RGB condition are retained as plot data.
@@ -1206,6 +1269,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "    ax.axvline(0, color='gray', linewidth=0.7, zorder=0)\n";
             o << "    ax.set_xlim(_gp_xmin, _gp_xmax)\n";
         }
+        if (p.box_aspect_ratio)
+            o << "ax.set_box_aspect(" << std::setprecision(17) << *p.box_aspect_ratio << ")\n";
         if (p.equal_units) {
             // A negative gnuplot ratio of -1 preserves equal lengths per data
             // unit while allowing a non-square axes rectangle.
@@ -1273,6 +1338,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << ", transform=ax.transAxes";
             if (!label.text_color.empty())
                 o << ", color=" << pystr(mpl_color(label.text_color));
+            if (label.font_size)
+                o << ", fontsize=" << *label.font_size;
             o << ")\n";
         }
         // Apply named ticks to primary axes. Secondary x/y tic axes are

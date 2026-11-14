@@ -914,11 +914,9 @@ double scalar_value(const std::string& expression, const std::map<std::string, d
     // Evaluate only numeric arithmetic and known scalar functions. This is
     // deliberately not an evaluation of arbitrary gnuplot or Python code.
     const std::string token = trim(expression);
-
     // Preserve decimal-comma scalar literals emitted by libgretl locales.
     if (const auto literal = number(token))
         return *literal;
-
     size_t pos = 0;
     const auto spaces = [&] {
         while (pos < token.size() && std::isspace(static_cast<unsigned char>(token[pos])))
@@ -1603,6 +1601,11 @@ ParseResult parse(const std::string& source) {
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)(?:\s+center)?(?:\s+(?:front|back))*(?:\s+rotate\s+by\s+-?[0-9.]+)?\s*$)GP");
+                // Correspondence-analysis plots attach font size and text color
+                // directly to data labels.  The package may omit whitespace
+                // between the closing font quote and `center`.
+                static const std::regex styled_data_label_re(
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^,\s]+?)(?:\s+font\s*(["'])[^"']*,([0-9]+)\5)?\s*center(?:\s+(?:front|back))*(?:\s+tc\s+rgb\s+["']([^"']+)["'])?\s*$)GP");
                 // PairPlot marks highlighted observations with numbered, empty
                 // point labels using explicit size, type and RGB color.
                 static const std::regex numbered_point_label_re(
@@ -1638,6 +1641,18 @@ ParseResult parse(const std::string& source) {
                     label.offset_x = *dx;
                     label.offset_y = *dy;
                     label.point_line_type = std::stoi(match[5].str());
+                    p->labels.push_back(std::move(label));
+                } else if (std::regex_match(s, match, styled_data_label_re)) {
+                    const double x = scalar_value(match[3].str(), plot_scalars);
+                    const double y = scalar_value(match[4].str(), plot_scalars);
+                    Plot::Label label{match[2].str(), x, y, false, true};
+                    if (match[6].matched) {
+                        const double size = std::stod(match[6].str());
+                        if (size <= 0)
+                            throw std::runtime_error("invalid label font size: " + s);
+                        label.font_size = size;
+                    }
+                    label.text_color = match[7].str();
                     p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, data_label_re)) {
                     // Keep the original data-label coordinate parsing intact.
@@ -1759,23 +1774,38 @@ ParseResult parse(const std::string& source) {
             if (s == "set size square") {
                 p->square = true;
                 p->equal_units = false;
+                p->box_aspect_ratio.reset();
                 continue;
             }
             // Gnuplot's negative ratio -1 means identical lengths per x/y unit,
             // not necessarily a square axes box when ranges are different.
             if (s == "set size ratio 1.0" || s == "set size ratio 1") {
+                // Retain the established exact-unit behavior for old scripts.
                 p->equal_units = true;
                 p->square = false;
+                p->box_aspect_ratio.reset();
                 continue;
             }
             if (s == "set size ratio -1") {
                 p->equal_units = true;
+                p->square = false;
+                p->box_aspect_ratio.reset();
+                continue;
+            }
+            // A positive ratio is a physical axes-box aspect, not equal data units.
+            if (starts(s, "set size ratio ")) {
+                const auto ratio = number(s.substr(15));
+                if (!ratio || *ratio <= 0)
+                    throw std::runtime_error("unsupported set size ratio: " + s);
+                p->box_aspect_ratio = *ratio;
+                p->equal_units = false;
                 p->square = false;
                 continue;
             }
             if (s == "set size noratio" || s == "set size nosquare") {
                 p->equal_units = false;
                 p->square = false;
+                p->box_aspect_ratio.reset();
                 continue;
             }
             // The size and origin settings describe the next panel in normalized
@@ -2119,7 +2149,8 @@ ParseResult parse(const std::string& source) {
             // Gnuplot can use splot to compute contours in a flat XY view.
             // These directives are meaningful together; never silently accept
             // an ordinary 3D surface as a two-dimensional contour plot.
-            if (s == "set contour base") {
+            if (s == "set contour base" || s == "set contour") {
+                // Bare `set contour` uses gnuplot's default base projection.
                 contour_base = true;
                 continue;
             }
@@ -2135,7 +2166,14 @@ ParseResult parse(const std::string& source) {
                 contour_surface = true;
                 continue;
             }
-            if (s == "set view map") {
+            if (s == "set view map" || starts(s, "set view map scale ")) {
+                // Map view projects gridded XYZ data onto the XY plane.
+                // Scale adjusts the projected plot footprint, not the XYZ values.
+                if (s != "set view map") {
+                    const auto scale = number(s.substr(19));
+                    if (!scale || *scale <= 0)
+                        throw std::runtime_error("unsupported map view scale: " + s);
+                }
                 contour_view_map = true;
                 continue;
             }
@@ -2172,18 +2210,19 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "set dgrid3d ")) {
-                // Named matrix blocks already provide a rectangular grid.
-                // Validate this directive, but do not regrid matrix values.
-                // For explicit XYZ points, retain the requested gridding parameters.
+                // Matrix blocks supply a grid; XYZ data need interpolation.
+                // Without an explicit qnorm argument gnuplot uses its default.
                 static const std::regex dgrid_re(
-                    R"(^set dgrid3d\s+([0-9]+)\s*,\s*([0-9]+)\s+qnorm\s+([0-9]+)\s*$)");
+                    R"(^set dgrid3d\s+([0-9]+)\s*,\s*([0-9]+)(?:\s+qnorm\s+([0-9]+))?\s*$)");
                 std::smatch match;
-                if (!std::regex_match(s, match, dgrid_re) || std::stoi(match[1].str()) < 2 ||
-                    std::stoi(match[2].str()) < 2 || std::stoi(match[3].str()) < 1)
+                if (!std::regex_match(s, match, dgrid_re))
                     throw std::runtime_error("unsupported dgrid3d directive: " + s);
-                dgrid3d = std::array<int, 3>{std::stoi(match[1].str()),
-                                             std::stoi(match[2].str()),
-                                             std::stoi(match[3].str())};
+                const int nx = std::stoi(match[1].str());
+                const int ny = std::stoi(match[2].str());
+                const int norm = match[3].matched ? std::stoi(match[3].str()) : 1;
+                if (nx < 2 || ny < 2 || nx > 2000 || ny > 2000 || norm < 1 || norm > 10)
+                    throw std::runtime_error("unsupported dgrid3d dimensions/norm: " + s);
+                dgrid3d = std::array<int, 3>{nx, ny, norm};
                 continue;
             }
             if (s == "unset dgrid3d") {
@@ -2235,7 +2274,57 @@ ParseResult parse(const std::string& source) {
                 }
                 continue;
             }
+            if (s == "unset ztics") {
+                p->ztics_disabled = true;
+                continue;
+            }
+            if (s == "set ztics") {
+                p->ztics_disabled = false;
+                continue;
+            }
             if (starts(s, "splot ")) {
+                // kddensity emits inline scattered XYZ data, requesting either
+                // contour lines or a filled pm3d map after dgrid3d interpolation.
+                // Consume the complete inline block so rows are not commands.
+                if (s == "splot '-' with lines") {
+                    if (!contour_view_map || contour_surface || !dgrid3d ||
+                        !(contour_base || pm3d_surface) || !p->series.empty() ||
+                        !p->images.empty() || !p->surfaces.empty() || !p->palette_xy.empty())
+                        throw std::runtime_error("unsupported inline XYZ map: " + s);
+                    std::vector<std::string> rows;
+                    bool ended = false;
+                    while (i + 1 < lines.size()) {
+                        const auto row = trim(lines[++i]);
+                        if (row == "e") {
+                            ended = true;
+                            break;
+                        }
+                        rows.push_back(row);
+                    }
+                    if (!ended)
+                        throw std::runtime_error("missing inline XYZ terminator 'e'");
+                    ContourGrid map;
+                    map.xyz_points = parse_xyz_points(rows, {1, 2, 3});
+                    map.dgrid3d = dgrid3d;
+                    map.filled_map = pm3d_surface && !contour_base;
+                    map.level_count = contour_level_count > 0 ? contour_level_count : 7;
+                    map.levels = contour_levels;
+                    if (!map.filled_map && contour_first_linetype > 0) {
+                        const size_t count = map.levels.empty()
+                                               ? static_cast<size_t>(map.level_count)
+                                               : map.levels.size();
+                        for (size_t k = 0; k < count; ++k) {
+                            const size_t idx = static_cast<size_t>(contour_first_linetype - 1) + k;
+                            if (idx >= d.linetype_colors.size() || d.linetype_colors[idx].empty())
+                                break;
+                            map.colors.push_back(d.linetype_colors[idx]);
+                            map.widths.push_back(
+                                idx < d.linetype_widths.size() ? d.linetype_widths[idx] : 1.5);
+                        }
+                    }
+                    p->contours.push_back(std::move(map));
+                    continue;
+                }
                 // A view-map XYZ splot uses its third `using` column to color
                 // lines/points in the XY plane (e.g. color_xy's time palette).
                 static const std::regex palette_xy_re(
@@ -2383,12 +2472,12 @@ ParseResult parse(const std::string& source) {
                                           : p->y2.tics;
                 tics.format = format_match[3].str();
                 // printf in contributed packages can escape each percent sign.
-                // Remove all such escapes before interpreting gnuplot tick formats.
+                // Remove every backslash before '%' so SI pairs such as
+                // "\%.0s \%c" reach the gnuplot-specific tick formatter.
                 for (size_t pos = 0; (pos = tics.format.find("\\%", pos)) != std::string::npos;
                      ++pos) {
                     tics.format.erase(pos, 1);
                 }
-
                 continue;
             }
             if (std::regex_search(s, std::regex(R"(^set xrange\s*\[)"))) {
