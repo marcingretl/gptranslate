@@ -45,6 +45,8 @@ struct Series {
     // Distinguish an explicitly selected plot color or line type from palette
     // fallback.
     bool explicit_color{false};
+    // Eight-digit Gnuplot 0xAARRGGBB embeds transparency in the first byte.
+    std::optional<double> color_alpha;
     Style style{Style::Lines};
 
     // Gnuplot dash type: 1 = solid, 2 = dashed.
@@ -68,6 +70,8 @@ struct Series {
     std::vector<double> upper;
     // Candlestick columns: x, box bottom, whisker bottom, whisker top, box top.
     std::vector<double> candle_low, candle_high, candle_top;
+    // A sixth using field may supply a per-candle/box palette coordinate.
+    std::vector<double> palette_values;
 };
 struct Tic {
     std::string label;
@@ -173,8 +177,26 @@ struct Plot {
         int point_type{1};
         double point_size{1.0};
         std::string point_color{};
+        // `tc rgb` applies to label text independently of point markers.
+        std::string text_color{};
     };
     std::vector<Label> labels;
+    struct CircleSector {
+        int id{};
+        double start{}, end{360.0};
+        double cx{0.5}, cy{0.5}, radius{0.25};
+        int line_type{1};
+    };
+    struct Rectangle {
+        int id{};
+        double x0{}, y0{}, x1{}, y1{};
+        std::string color;
+        double alpha{1.0};
+        bool clip{true};
+    };
+    // Gnuplot objects are independent of ordinary data series.
+    std::vector<CircleSector> sectors;
+    std::vector<Rectangle> rectangles;
     bool xtics_disabled{false}, ytics_disabled{false};
     // Gnuplot offsets in graph-relative units: left, right, top, bottom.
     std::optional<std::array<double, 4>> graph_offsets;

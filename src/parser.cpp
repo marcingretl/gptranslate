@@ -31,6 +31,8 @@
 #include <sstream>
 #include <stdexcept>
 namespace gptranslate {
+// Shared restricted numeric parser, also used by palette conditionals.
+double scalar_value(const std::string&, const std::map<std::string, double>&);
 namespace {
 // Translate a restricted arithmetic expression without executing source text.
 // The lexer accepts numbers, x, assigned scalars, supported math functions,
@@ -395,9 +397,8 @@ std::vector<std::array<double, 3>> parse_xyz_points(const std::vector<std::strin
             points.push_back(point);
     }
     if (points.size() < min_points)
-        throw std::runtime_error(min_points == 3
-                                     ? "3D XYZ surface requires at least three points"
-                                     : "palette plot has no valid XYZ points");
+        throw std::runtime_error(min_points == 3 ? "3D XYZ surface requires at least three points"
+                                                 : "palette plot has no valid XYZ points");
     return points;
 }
 // Parse matrix labels with gnuplot pseudo-columns, sprintf formatting and
@@ -806,10 +807,95 @@ std::vector<std::string> using_fields(const std::string& spec, size_t expected =
     }
     return fields;
 }
+// Evaluate a restricted using-expression condition, e.g. `($4 < $1 ? -1 : 1)`.
+// Distinguish numeric literals from $N column references, and only accept
+// elementary comparisons with nested ternary branches (no arbitrary code).
+std::optional<double> palette_condition(const std::string& expression,
+                                        const std::vector<std::string>& cells) {
+    auto value = trim(expression);
+    const auto outer_parentheses = [](const std::string& text) {
+        if (text.size() < 2 || text.front() != '(' || text.back() != ')')
+            return false;
+        int depth = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '(')
+                ++depth;
+            if (text[i] == ')' && --depth == 0 && i + 1 != text.size())
+                return false;
+        }
+        return depth == 0;
+    };
+    while (outer_parentheses(value))
+        value = trim(value.substr(1, value.size() - 2));
+    const auto evaluate_numeric = [&](const std::string& text) -> std::optional<double> {
+        std::string expanded;
+        for (size_t i = 0; i < text.size();) {
+            if (text[i] != '$') {
+                expanded.push_back(text[i++]);
+                continue;
+            }
+            ++i;
+            const size_t start = i;
+            while (i < text.size() && std::isdigit(static_cast<unsigned char>(text[i])))
+                ++i;
+            if (start == i)
+                return std::nullopt;
+            const size_t col = std::stoul(text.substr(start, i - start));
+            if (col < 1 || col > cells.size())
+                return std::nullopt;
+            const auto num = number(cells[col - 1]);
+            if (!num)
+                return std::nullopt;
+            expanded += "(" + std::to_string(*num) + ")";
+        }
+        return scalar_value(expanded, {});
+    };
+    size_t question = std::string::npos, colon = std::string::npos;
+    int depth = 0;
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '(')
+            ++depth;
+        else if (value[i] == ')')
+            --depth;
+        else if (depth == 0 && value[i] == '?' && question == std::string::npos)
+            question = i;
+        else if (depth == 0 && value[i] == ':' && question != std::string::npos) {
+            colon = i;
+            break;
+        }
+    }
+    if (question == std::string::npos)
+        return evaluate_numeric(value);
+    if (colon == std::string::npos)
+        throw std::runtime_error("invalid palette conditional: " + expression);
+    static const std::regex comparison(R"(^\s*(.*?)\s*(==|!=|<=|>=|<|>)\s*(.*?)\s*$)");
+    std::smatch match;
+    const std::string predicate = value.substr(0, question);
+    if (!std::regex_match(predicate, match, comparison))
+        throw std::runtime_error("unsupported palette comparison: " + expression);
+    const auto left = evaluate_numeric(match[1].str());
+    const auto right = evaluate_numeric(match[3].str());
+    if (!left || !right)
+        return std::nullopt;
+    const auto op = match[2].str();
+    const bool yes = op == "==" ? *left == *right
+                   : op == "!=" ? *left != *right
+                   : op == "<=" ? *left <= *right
+                   : op == ">=" ? *left >= *right
+                   : op == "<"  ? *left < *right
+                                : *left > *right;
+    return palette_condition(value.substr(yes ? question + 1 : colon + 1,
+                                          yes ? colon - question - 1 : std::string::npos),
+                             cells);
+}
 // Evaluate a using field as a column reference or a restricted expression.
 std::optional<double> evaluate_using_field(const std::string& field,
-                                           const std::vector<std::string>& cells) {
+                                           const std::vector<std::string>& cells,
+                                           size_t row_index = 0) {
     const std::string expr = trim(field);
+    // Pseudo-column 0 is the zero-based gnuplot record index.
+    if (expr == "0")
+        return static_cast<double>(row_index);
 
     // Bare integers denote 1-based column indices, not constants.
     if (!expr.empty() &&
@@ -825,18 +911,110 @@ std::optional<double> evaluate_using_field(const std::string& field,
 // Evaluate scalar expressions used by assignments and conditional branches.
 // Unknown identifiers and unsupported syntax are errors, never implicit zeroes.
 double scalar_value(const std::string& expression, const std::map<std::string, double>& variables) {
-    const auto token = trim(expression);
-    if (const auto value = number(token)) {
-        return *value;
-    }
-    static const std::regex identifier(R"(^[A-Za-z_][A-Za-z0-9_]*$)");
-    if (std::regex_match(token, identifier)) {
-        const auto found = variables.find(token);
-        if (found == variables.end())
-            throw std::runtime_error("undefined variable: " + token);
-        return found->second;
-    }
-    throw std::runtime_error("unsupported scalar expression: " + token);
+    // Evaluate only numeric arithmetic and known scalar functions. This is
+    // deliberately not an evaluation of arbitrary gnuplot or Python code.
+    const std::string token = trim(expression);
+
+    // Preserve decimal-comma scalar literals emitted by libgretl locales.
+    if (const auto literal = number(token))
+        return *literal;
+
+    size_t pos = 0;
+    const auto spaces = [&] {
+        while (pos < token.size() && std::isspace(static_cast<unsigned char>(token[pos])))
+            ++pos;
+    };
+    std::function<double()> sum, product, atom;
+    atom = [&]() -> double {
+        spaces();
+        if (pos >= token.size())
+            throw std::runtime_error("incomplete scalar expression: " + token);
+        if (token[pos] == '+' || token[pos] == '-') {
+            const char sign = token[pos++];
+            const double result = atom();
+            return sign == '-' ? -result : result;
+        }
+        if (token[pos] == '(') {
+            ++pos;
+            const double result = sum();
+            spaces();
+            if (pos >= token.size() || token[pos++] != ')')
+                throw std::runtime_error("unbalanced scalar expression: " + token);
+            return result;
+        }
+        if (std::isalpha(static_cast<unsigned char>(token[pos])) || token[pos] == '_') {
+            const size_t begin = pos++;
+            while (pos < token.size() &&
+                   (std::isalnum(static_cast<unsigned char>(token[pos])) || token[pos] == '_'))
+                ++pos;
+            const auto name = token.substr(begin, pos - begin);
+            spaces();
+            if (pos < token.size() && token[pos] == '(') {
+                ++pos;
+                const double arg = sum();
+                spaces();
+                if (pos >= token.size() || token[pos++] != ')')
+                    throw std::runtime_error("invalid scalar function: " + token);
+                if (name == "sin")
+                    return std::sin(arg);
+                if (name == "cos")
+                    return std::cos(arg);
+                if (name == "sqrt" && arg >= 0)
+                    return std::sqrt(arg);
+                if (name == "abs")
+                    return std::abs(arg);
+                if (name == "exp")
+                    return std::exp(arg);
+                if (name == "log" && arg > 0)
+                    return std::log(arg);
+                throw std::runtime_error("unsupported scalar function: " + name);
+            }
+            if (name == "pi")
+                return std::acos(-1.0);
+            const auto it = variables.find(name);
+            if (it == variables.end())
+                throw std::runtime_error("undefined variable: " + name);
+            return it->second;
+        }
+        // stod consumes only the initial numeric token; the caller checks
+        // the remaining input after parsing the complete expression.
+        if (std::isdigit(static_cast<unsigned char>(token[pos])) || token[pos] == '.') {
+            size_t consumed = 0;
+            const double value = std::stod(token.substr(pos), &consumed);
+            pos += consumed;
+            return value;
+        }
+        throw std::runtime_error("unsupported scalar expression: " + token);
+    };
+    product = [&]() -> double {
+        double lhs = atom();
+        while (true) {
+            spaces();
+            if (pos >= token.size() || (token[pos] != '*' && token[pos] != '/'))
+                return lhs;
+            const char op = token[pos++];
+            const double rhs = atom();
+            if (op == '/' && rhs == 0)
+                throw std::runtime_error("division by zero in scalar expression");
+            lhs = op == '*' ? lhs * rhs : lhs / rhs;
+        }
+    };
+    sum = [&]() -> double {
+        double lhs = product();
+        while (true) {
+            spaces();
+            if (pos >= token.size() || (token[pos] != '+' && token[pos] != '-'))
+                return lhs;
+            const char op = token[pos++];
+            const double rhs = product();
+            lhs = op == '+' ? lhs + rhs : lhs - rhs;
+        }
+    };
+    const double result = sum();
+    spaces();
+    if (pos != token.size() || !std::isfinite(result))
+        throw std::runtime_error("unsupported scalar expression: " + token);
+    return result;
 }
 // Support scalar truth values and comparisons without evaluating arbitrary
 // code.
@@ -939,10 +1117,18 @@ void resolve_conditionals(std::vector<std::string>& lines, std::vector<Diagnosti
             }
             if (std::regex_match(statement, match, assignment)) {
                 if (active) {
-                    try {
-                        variables[match[1].str()] = scalar_value(match[2].str(), variables);
-                    } catch (const std::exception& e) {
-                        errors.push_back({line_number, e.what()});
+                    // The piechart package emits several scalar assignments on
+                    // one line. Resolve each in order, matching the later
+                    // command-splitting pass without losing source line numbers.
+                    for (const auto& command : split_commands(statement)) {
+                        std::smatch item;
+                        if (!std::regex_match(command, item, assignment))
+                            break; // Other commands are processed by the main parser.
+                        try {
+                            variables[item[1].str()] = scalar_value(item[2].str(), variables);
+                        } catch (const std::exception& e) {
+                            errors.push_back({line_number, e.what()});
+                        }
                     }
                 }
                 // Keep active assignments for the plot parser: theoretical
@@ -977,6 +1163,8 @@ ParseResult parse(const std::string& source) {
     // Keep scalar definitions local and in source order. The conditional pass
     // selects active lines; this pass resolves values at each plot command.
     std::map<std::string, double> plot_scalars;
+    // Named cubic functions used by SankeyPlot's '+' sampled ribbons.
+    std::map<std::string, std::string> ribbon_functions;
     std::istringstream input(source);
     std::vector<std::string> lines;
     std::string line;
@@ -1090,6 +1278,18 @@ ParseResult parse(const std::string& source) {
             }
         }
         try {
+            // Restricted named functions in SankeyPlot are cubic polynomials
+            // of x. Reject definitions containing unsupported expressions.
+            std::smatch ribbon_definition;
+            static const std::regex ribbon_re(R"(^([A-Za-z_][A-Za-z0-9_]*)\(x\)\s*=\s*(.+)$)");
+            if (std::regex_match(s, ribbon_definition, ribbon_re)) {
+                const std::string name = ribbon_definition[1].str();
+                const std::string formula = ribbon_definition[2].str();
+                for (double sample : {0.0, 0.5, 1.0})
+                    (void)scalar_value(formula, {{"x", sample}});
+                ribbon_functions[name] = formula;
+                continue;
+            }
             // Preserve active scalar assignments in the plotting environment.
             // Never execute arbitrary gnuplot text as Python source.
             std::smatch scalar_assignment;
@@ -1112,6 +1312,16 @@ ParseResult parse(const std::string& source) {
                 static const std::regex named_style_re(
                     R"GP(^set style line\s+([1-9][0-9]*)\s+lc\s+rgb\s+(['"])(.*?)\2\s+lt\s+(-?[0-9]+)\s+lw\s+([0-9]+(?:\.[0-9]+)?)\s*$)GP");
                 std::smatch m;
+                static const std::regex width_only_re(
+                    R"(^set style line\s+([1-9][0-9]*)\s+lw\s+([0-9]+(?:\.[0-9]+)?)\s*$)");
+                if (std::regex_match(s, m, width_only_re)) {
+                    NamedLineStyle style;
+                    style.width = std::stod(m[2].str());
+                    if (style.width <= 0)
+                        throw std::runtime_error("invalid style line width: " + s);
+                    named_line_styles[std::stoi(m[1].str())] = std::move(style);
+                    continue;
+                }
                 if (!std::regex_match(s, m, named_style_re))
                     throw std::runtime_error("unsupported style line definition: " + s);
                 NamedLineStyle style;
@@ -1124,9 +1334,9 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             // Linetype definitions are global and may precede the plot command.
-            if (starts(s, "set linetype ")) {
+            if (starts(s, "set linetype ") || starts(s, "set lt ")) {
                 std::smatch m;
-                if (std::regex_search(s, m, std::regex(R"(^set linetype\s+(\d+))"))) {
+                if (std::regex_search(s, m, std::regex(R"(^set (?:linetype|lt)\s+(\d+))"))) {
                     auto n = std::stoi(m[1]);
                     if (n > 0 && n <= 256) {
                         if (d.linetype_colors.size() < static_cast<size_t>(n)) {
@@ -1163,6 +1373,10 @@ ParseResult parse(const std::string& source) {
                 std::istringstream bs(s.substr(11));
                 bs >> p->border;
                 p->border_color = keyword_value(s, "lc rgb");
+                continue;
+            }
+            if (s == "unset tics") {
+                p->xtics_disabled = p->ytics_disabled = true;
                 continue;
             }
             if (s == "set tics nomirror") {
@@ -1303,7 +1517,78 @@ ParseResult parse(const std::string& source) {
                 p->ytics_disabled = false;
                 continue;
             }
+            // Each pie sector is specified in two `set obj N circle` commands:
+            // the first supplies its angular span, the second its screen geometry.
+            if (starts(s, "set obj ") || starts(s, "set object ")) {
+                std::smatch obj;
+                static const std::regex circle_arc(
+                    R"(^set (?:obj|object)\s+(\d+)\s+circle\s+arc\s*\[([^:]+):([^\]]+)\]\s+fc\s+lt\s+(\d+)\s*$)");
+                static const std::regex circle_position(
+                    R"(^set (?:obj|object)\s+(\d+)\s+circle\s+at\s+screen\s+([^,]+),([^\s]+)\s+size\s+screen\s+([^\s]+)(?:\s+front)?\s*$)");
+                static const std::regex rectangle(
+                    R"GP(^set (?:obj|object)\s+(\d+)\s+rect\s+from\s+([^,]+),\s*([^\s]+)\s+to\s+([^,]+),\s*([^\s]+)\s+fc\s+rgb\s+["'](0x[0-9a-fA-F]{6,8})["']\s+(noclip\s+)?fillstyle\s+solid\s+([0-9]*\.?[0-9]+)\s*$)GP");
+                const bool is_arc = std::regex_match(s, obj, circle_arc);
+                const bool is_position = !is_arc && std::regex_match(s, obj, circle_position);
+                if (is_arc || is_position) {
+                    const int id = std::stoi(obj[1].str());
+                    auto found = std::find_if(p->sectors.begin(),
+                                              p->sectors.end(),
+                                              [id](const auto& sector) { return sector.id == id; });
+                    if (found == p->sectors.end()) {
+                        p->sectors.push_back({});
+                        found = std::prev(p->sectors.end());
+                        found->id = id;
+                    }
+                    if (is_arc) {
+                        found->start = scalar_value(obj[2].str(), plot_scalars);
+                        found->end = scalar_value(obj[3].str(), plot_scalars);
+                        found->line_type = std::stoi(obj[4].str());
+                    } else {
+                        found->cx = scalar_value(obj[2].str(), plot_scalars);
+                        found->cy = scalar_value(obj[3].str(), plot_scalars);
+                        found->radius = scalar_value(obj[4].str(), plot_scalars);
+                        if (found->radius <= 0)
+                            throw std::runtime_error("invalid circle radius: " + s);
+                    }
+                    continue;
+                }
+                if (std::regex_match(s, obj, rectangle)) {
+                    Plot::Rectangle rect;
+                    rect.id = std::stoi(obj[1].str());
+                    rect.x0 = scalar_value(obj[2].str(), plot_scalars);
+                    rect.y0 = scalar_value(obj[3].str(), plot_scalars);
+                    rect.x1 = scalar_value(obj[4].str(), plot_scalars);
+                    rect.y1 = scalar_value(obj[5].str(), plot_scalars);
+                    std::string hex = obj[6].str().substr(2);
+                    const double fill_alpha = scalar_value(obj[8].str(), plot_scalars);
+                    if (fill_alpha < 0 || fill_alpha > 1)
+                        throw std::runtime_error("invalid rectangle fill density: " + s);
+                    rect.alpha = fill_alpha;
+                    if (hex.size() == 8) {
+                        // Gnuplot 0xAARRGGBB uses 0xFF for fully transparent.
+                        rect.alpha *= 1.0 - std::stoi(hex.substr(0, 2), nullptr, 16) / 255.0;
+                        hex.erase(0, 2);
+                    }
+                    rect.color = "#" + hex;
+                    rect.clip = !obj[7].matched;
+                    auto found = std::find_if(p->rectangles.begin(),
+                                              p->rectangles.end(),
+                                              [&](const auto& item) { return item.id == rect.id; });
+                    if (found == p->rectangles.end())
+                        p->rectangles.push_back(std::move(rect));
+                    else
+                        *found = std::move(rect);
+                    continue;
+                }
+                throw std::runtime_error("unsupported gnuplot object: " + s);
+            }
+            if (s == "set angles degrees" || s == "set angles radians")
+                continue; // Circle arcs are specified explicitly in degrees.
             // Reset text annotations before libgretl writes per-cell labels.
+            if (std::regex_match(s, std::regex(R"(^unset label\s+[0-9]+$)"))) {
+                // Numbered labels may be reset between multiplot panels.
+                continue;
+            }
             if (s == "unset label") {
                 p->labels.clear();
                 continue;
@@ -1313,11 +1598,11 @@ ParseResult parse(const std::string& source) {
                 // Decimal commas in data coordinates must not be mistaken for
                 // the separator between x and y (as used by boxplots).
                 static const std::regex graph_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+([^,\s]+)\s*,\s*graph\s+([^\s]+)(?:\s+(center|front|back))?\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+(.+?)\s*,\s*graph\s+(.+?)(?:\s+(center))?(?:\s+(?:front|back))*(?:\s+tc\s+rgb\s+["']([^"']+)["'])?\s*$)GP");
                 static const std::regex point_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)\s+center(?:\s+(?:front|back))*\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)(?:\s+center)?(?:\s+(?:front|back))*(?:\s+rotate\s+by\s+-?[0-9.]+)?\s*$)GP");
                 // PairPlot marks highlighted observations with numbered, empty
                 // point labels using explicit size, type and RGB color.
                 static const std::regex numbered_point_label_re(
@@ -1336,12 +1621,13 @@ ParseResult parse(const std::string& source) {
                     label.point_color = match[9].str();
                     p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, graph_label_re)) {
-                    const auto x = number(match[3].str()), y = number(match[4].str());
-                    if (!x || !y)
-                        throw std::runtime_error("invalid label coordinates: " + s);
+                    const double x = scalar_value(match[3].str(), plot_scalars);
+                    const double y = scalar_value(match[4].str(), plot_scalars);
                     // Layer keywords are accepted; Matplotlib draws graph
                     // annotations above the data by default.
-                    p->labels.push_back({match[2].str(), *x, *y, true, match[5].str() == "center"});
+                    Plot::Label label{match[2].str(), x, y, true, match[5].str() == "center"};
+                    label.text_color = match[6].str();
+                    p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, point_label_re)) {
                     const auto x = number(match[3].str()), y = number(match[4].str());
                     const auto dx = number(match[7].str()), dy = number(match[8].str());
@@ -1355,15 +1641,18 @@ ParseResult parse(const std::string& source) {
                     p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, data_label_re)) {
                     // Keep the original data-label coordinate parsing intact.
-                    static const std::regex coords_re(R"GP(^([^,\s]+)\s*,\s*([^\s]+)$)GP");
+                    static const std::regex coords_re(R"GP(^([^,]+)\s*,\s*(.+)$)GP");
                     std::smatch coords;
                     const std::string coordinates = match[3].str();
                     if (!std::regex_match(coordinates, coords, coords_re))
                         throw std::runtime_error("unsupported label: " + s);
-                    const auto x = number(coords[1].str()), y = number(coords[2].str());
-                    if (!x || !y)
-                        throw std::runtime_error("invalid label coordinates: " + s);
-                    p->labels.push_back({match[2].str(), *x, *y, false, true});
+                    const double x = scalar_value(coords[1].str(), plot_scalars);
+                    const double y = scalar_value(coords[2].str(), plot_scalars);
+                    p->labels.push_back({match[2].str(),
+                                         x,
+                                         y,
+                                         false,
+                                         coordinates.find(" center") != std::string::npos});
                 } else {
                     throw std::runtime_error("unsupported label: " + s);
                 }
@@ -1373,8 +1662,7 @@ ParseResult parse(const std::string& source) {
             // instead specifies an absolute fraction of the full figure.
             // An omitted or negative character margin restores automatic layout.
             {
-                static const std::regex margin_re(
-                    R"(^(set|unset) ([lrbt])margin(?:\s+(.*))?$)");
+                static const std::regex margin_re(R"(^(set|unset) ([lrbt])margin(?:\s+(.*))?$)");
                 std::smatch margin_match;
                 if (std::regex_match(s, margin_match, margin_re)) {
                     const std::string side = margin_match[2].str();
@@ -1475,6 +1763,11 @@ ParseResult parse(const std::string& source) {
             }
             // Gnuplot's negative ratio -1 means identical lengths per x/y unit,
             // not necessarily a square axes box when ranges are different.
+            if (s == "set size ratio 1.0" || s == "set size ratio 1") {
+                p->equal_units = true;
+                p->square = false;
+                continue;
+            }
             if (s == "set size ratio -1") {
                 p->equal_units = true;
                 p->square = false;
@@ -1605,6 +1898,10 @@ ParseResult parse(const std::string& source) {
             if (starts(s, "set encoding ") || starts(s, "set termoption ") ||
                 starts(s, "set decimalsign ") || starts(s, "set datafile missing "))
                 continue;
+            if (s == "unset title") {
+                p->title.clear();
+                continue;
+            }
             if (text_command(s, "set title")) {
                 p->title = quoted(s.substr(9));
                 continue;
@@ -1954,7 +2251,7 @@ ParseResult parse(const std::string& source) {
                                                  palette_match[1].str());
                     PaletteXY palette_plot;
                     const auto mode = palette_match[5].str();
-                    palette_plot.style = mode == "lines" ? Style::Lines
+                    palette_plot.style = mode == "lines"  ? Style::Lines
                                        : mode == "points" ? Style::Points
                                                           : Style::LinesPoints;
                     if (palette_match[6].matched)
@@ -2071,13 +2368,13 @@ ParseResult parse(const std::string& source) {
                 p->timefmt = time_match[2].str();
                 continue;
             }
-            // Gnuplot's numeric axis formats are passed to matplotlib's formatter.
+            // Gnuplot accepts both `set format x "%g"` and a parenthesized
+            // string (`set format x ("%g")`); a bare axis restores its default.
             if (starts(s, "set format ")) {
                 std::smatch format_match;
-                if (!std::regex_match(
-                        s,
-                        format_match,
-                        std::regex(R"(^set format (x|y|x2|y2)\s+([\"'])(.*?)\2\s*$)")))
+                static const std::regex format_re(
+                    R"(^set format (x|y|x2|y2)(?:\s+(?:\(\s*)?([\"'])(.*?)\2(?:\s*\))?)?\s*$)");
+                if (!std::regex_match(s, format_match, format_re))
                     throw std::runtime_error("unsupported axis format: " + s);
                 const auto axis = format_match[1].str();
                 auto& tics = axis == "x"  ? p->x.tics
@@ -2085,6 +2382,13 @@ ParseResult parse(const std::string& source) {
                            : axis == "x2" ? p->x2.tics
                                           : p->y2.tics;
                 tics.format = format_match[3].str();
+                // printf in contributed packages can escape each percent sign.
+                // Remove all such escapes before interpreting gnuplot tick formats.
+                for (size_t pos = 0; (pos = tics.format.find("\\%", pos)) != std::string::npos;
+                     ++pos) {
+                    tics.format.erase(pos, 1);
+                }
+
                 continue;
             }
             if (std::regex_search(s, std::regex(R"(^set xrange\s*\[)"))) {
@@ -2267,16 +2571,18 @@ ParseResult parse(const std::string& source) {
                     if (file_source)
                         previous_source = src;
                     const bool inline_data = src == "'-'" || src == "\"-\"" || src == "-";
+                    const bool sampled_data = src == "'+'" || src == "\"+\"" || src == "+";
                     // Named sources reuse the same column interpretation as inline data.
                     // Named sources can contain either ordinary columns or a numeric
                     // matrix.
                     const std::vector<std::string>* named_rows = nullptr;
                     // A numeric plot source denotes a constant function, not a data file.
-                    const auto constant_value = inline_data ? std::optional<double>{} : number(src);
+                    const auto constant_value =
+                        (inline_data || sampled_data) ? std::optional<double>{} : number(src);
                     // Parse the complete analytic source, not merely its first numeric
                     // token.
                     std::optional<std::string> analytic_value;
-                    if (!inline_data) {
+                    if (!inline_data && !sampled_data) {
                         const auto title_pos = spec.find(" title ");
                         const auto notitle_pos = spec.find(" notitle");
                         const auto with_pos = spec.find(" with ");
@@ -2315,7 +2621,7 @@ ParseResult parse(const std::string& source) {
                             }
                         }
                     }
-                    if (!inline_data && !constant_value && !analytic_value) {
+                    if (!inline_data && !sampled_data && !constant_value && !analytic_value) {
                         auto found = d.data_blocks.find(src);
                         if (found != d.data_blocks.end()) {
                             named_rows = &found->second;
@@ -2366,6 +2672,12 @@ ParseResult parse(const std::string& source) {
                     ser.color = keyword_value(spec, "lc rgb");
                     if (ser.color.empty()) {
                         ser.color = keyword_value(spec, "linecolor rgb");
+                    }
+                    if (ser.color.size() == 10 && starts(ser.color, "0x")) {
+                        const auto hex = ser.color.substr(2);
+                        if (hex.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
+                            ser.color_alpha =
+                                1.0 - std::stoi(hex.substr(0, 2), nullptr, 16) / 255.0;
                     }
                     // Preserve explicit color selection before applying any palette
                     // fallback.
@@ -2480,10 +2792,38 @@ ParseResult parse(const std::string& source) {
                     if (constant_value && !analytic_value) {
                         // A constant function does not consume subsequent inline data rows.
                         ser.constant_y = *constant_value;
+                        if (p->sectors.empty())
+                            p->series.push_back(std::move(ser));
+                        continue;
+                    }
+                    if (sampled_data) {
+                        // SankeyPlot builds '+' filled curves from a pair of
+                        // named polynomial functions evaluated over xrange.
+                        if (ser.style != Style::FilledCurve)
+                            throw std::runtime_error("unsupported '+' plot style: " + spec);
+                        static const std::regex ribbon_using(
+                            R"(^.*?\s+(?:using|u)\s+1:\(([A-Za-z_][A-Za-z0-9_]*)\(\$1\)\):\(([A-Za-z_][A-Za-z0-9_]*)\(\$1\)\)\s+.*$)");
+                        std::smatch names;
+                        if (!std::regex_match(spec, names, ribbon_using))
+                            throw std::runtime_error("unsupported '+' filledcurve expression: " +
+                                                     spec);
+                        const auto low_it = ribbon_functions.find(names[1].str());
+                        const auto high_it = ribbon_functions.find(names[2].str());
+                        if (low_it == ribbon_functions.end() || high_it == ribbon_functions.end())
+                            throw std::runtime_error("undefined Sankey curve function: " + spec);
+                        const double xmin = p->x.min.value_or(0.0);
+                        const double xmax = p->x.max.value_or(1.0);
+                        for (int j = 0; j <= 200; ++j) {
+                            const double x = xmin + (xmax - xmin) * j / 200;
+                            ser.points.push_back({x, scalar_value(low_it->second, {{"x", x}})});
+                            ser.upper.push_back(scalar_value(high_it->second, {{"x", x}}));
+                        }
                         p->series.push_back(std::move(ser));
                         continue;
                     }
                     const bool candle = ser.style == Style::Candlesticks;
+                    const bool palette_box =
+                        ser.style == Style::Boxes && spec.find(" palette") != std::string::npos;
                     const bool filled = ser.style == Style::FilledCurve;
                     const bool errorbars = ser.style == Style::ErrorBars;
                     const auto using_pos = using_offset(spec);
@@ -2505,11 +2845,14 @@ ParseResult parse(const std::string& source) {
                     // as $data are not column expressions.
                     const bool using_expr = !filled && !errorbars && has_using &&
                                             spec.find('$', *using_pos) != spec.npos;
-                    const auto fields = candle     ? using_fields(spec, 5)
-                                      : filled     ? using_fields(spec)
-                                      : using_expr ? using_fields(spec, 2)
-                                                   : std::vector<std::string>{};
-                    auto xcol = (filled || using_expr || candle || errorbars)
+                    const auto fields =
+                        candle
+                            ? using_fields(spec, spec.find(" palette") != std::string::npos ? 6 : 5)
+                        : filled      ? using_fields(spec)
+                        : palette_box ? using_fields(spec, 3)
+                        : using_expr  ? using_fields(spec, 2)
+                                      : std::vector<std::string>{};
+                    auto xcol = (filled || using_expr || candle || palette_box || errorbars)
                                   ? 1
                                   : using_col(spec, 1, true);
                     // Histograms use the row number as x; `using 2` selects only the
@@ -2529,8 +2872,11 @@ ParseResult parse(const std::string& source) {
                                 throw std::runtime_error("unsupported histogram xtic: " + spec);
                         }
                     }
-                    auto ycol = (filled || using_expr || candle) ? 2 : using_col(spec, 2, false);
-                    const bool record_categories = category_col > 0 && p->histogram_categories.empty();
+                    auto ycol = (filled || using_expr || candle || palette_box)
+                                  ? 2
+                                  : using_col(spec, 2, false);
+                    const bool record_categories =
+                        category_col > 0 && p->histogram_categories.empty();
                     size_t row = 0;
                     bool ended = false;
                     size_t named_index = 0;
@@ -2577,8 +2923,8 @@ ParseResult parse(const std::string& source) {
                         if (candle) {
                             // Gnuplot candlesticks use x:open:low:high:close columns.
                             std::vector<std::optional<double>> values;
-                            for (const auto& field : fields)
-                                values.push_back(evaluate_using_field(field, cells));
+                            for (size_t k = 0; k < std::min<size_t>(5, fields.size()); ++k)
+                                values.push_back(evaluate_using_field(fields[k], cells, row));
                             if (std::all_of(values.begin(), values.end(), [](const auto& v) {
                                     return v.has_value();
                                 })) {
@@ -2586,6 +2932,21 @@ ParseResult parse(const std::string& source) {
                                 ser.candle_low.push_back(*values[2]);
                                 ser.candle_high.push_back(*values[3]);
                                 ser.candle_top.push_back(*values[4]);
+                                if (fields.size() == 6) {
+                                    const auto color = palette_condition(fields[5], cells);
+                                    if (!color)
+                                        throw std::runtime_error(
+                                            "invalid candle palette coordinate");
+                                    ser.palette_values.push_back(*color);
+                                }
+                            }
+                        } else if (palette_box) {
+                            const auto px = evaluate_using_field(fields[0], cells, row);
+                            const auto py = evaluate_using_field(fields[1], cells, row);
+                            const auto color = palette_condition(fields[2], cells);
+                            if (px && py && color) {
+                                ser.points.push_back({*px, *py});
+                                ser.palette_values.push_back(*color);
                             }
                         } else if (filled) {
                             // Evaluate the two boundaries against the same data row.

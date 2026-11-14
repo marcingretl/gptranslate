@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Extended contributed-package plotting coverage for `gnuplot_piechart`,
+  `candlesticks` and `SankeyPlot`: restricted scalar arithmetic and chained
+  assignments, screen/graph pie sectors and labels, Gnuplot `set format`
+  parentheses and SI tick prefixes, six-field candlestick palette conditionals,
+  palette-colored volume bars, translucent object rectangles, and sampled
+  cubic-polynomial Sankey ribbons. Added four Agg rendering regressions.
+  Geometry and colors remain approximate where Gnuplot and Matplotlib use
+  different layout/terminal semantics.
+
 - Added support for the `color_xy` package's palette-colored `splot` with
   `set view map`: a third numeric column now colors XY lines and points,
   including `linespoints` and the corresponding colorbar. `set palette

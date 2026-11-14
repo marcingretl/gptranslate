@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 namespace gptranslate {
@@ -68,6 +69,10 @@ std::string mpl_color(const std::string& color) {
         hex.erase(0, 2);
     }
 
+    // Gnuplot 0xAARRGGBB embeds transparency ahead of the RGB bytes. The
+    // caller handles alpha separately; Matplotlib must receive six RGB digits.
+    if (hex.size() == 8)
+        hex.erase(0, 2);
     // Accept hexadecimal RGB values up to six digits.
     if (hex.empty() || hex.size() > 6 ||
         hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
@@ -143,7 +148,20 @@ void emit_tics(std::ostringstream& o,
         }
     }
     if (!tics.format.empty()) {
-        if (unix_time) {
+        // Gnuplot's %s/%c pair means a scaled mantissa and an SI prefix.
+        // Python's %-formatting interprets them as two unrelated arguments.
+        if (std::regex_search(tics.format, std::regex(R"(%(?:\.[0-9]+)?s\s+%c)"))) {
+            o << "def _gp_si_tick(value, pos):\n"
+                 "    import math\n"
+                 "    if not value: return '0'\n"
+                 "    exponent = max(-24, min(24, int(math.floor(math.log10(abs(value)) / 3)) * "
+                 "3))\n"
+                 "    prefix = "
+                 "{-24:'y',-21:'z',-18:'a',-15:'f',-12:'p',-9:'n',-6:'u',-3:'m',0:'',3:'k',6:'M',9:"
+                 "'G',12:'T',15:'P',18:'E',21:'Z',24:'Y'}[exponent]\n"
+                 "    return f'{value / 10**exponent:.0f} {prefix}'\n";
+            o << target << "." << axis << "axis.set_major_formatter(FuncFormatter(_gp_si_tick))\n";
+        } else if (unix_time) {
             // Keep Unix seconds as axis coordinates, so ranges and explicit tics
             // remain in gnuplot units; only convert values when formatting labels.
             o << target << "." << axis << "axis.set_major_formatter(FuncFormatter("
@@ -299,12 +317,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             return p.colorbox && p.colorbox_position.has_value();
         });
     // Apply explicit gnuplot margins only after automatic Matplotlib layout.
-    const bool manual_margins =
-        std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
-            return std::any_of(p.margins.begin(), p.margins.end(), [](const auto& m) {
-                return m.has_value();
-            });
-        });
+    const bool manual_margins = std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+        return std::any_of(
+            p.margins.begin(), p.margins.end(), [](const auto& m) { return m.has_value(); });
+    });
     // Register hover handling only when the plot contains visible point markers.
     // Lines and synthetic reference curves must not trigger a tooltip.
     const bool hover_points = std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
@@ -331,9 +347,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
          "AutoMinorLocator\n";
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
     // Map-view palette lines use a collection with a color for each segment.
-    if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
-            return !p.palette_xy.empty();
-        }))
+    if (std::any_of(
+            d.plots.begin(), d.plots.end(), [](const Plot& p) { return !p.palette_xy.empty(); }))
         o << "from matplotlib.collections import LineCollection\n";
     // NumPy is needed for gridded plots and palette-colored trajectories.
     if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
@@ -406,8 +421,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "axes[" << p.panel_index << "] = ax\n";
             }
         }
-        if (manual_margins && std::any_of(p.margins.begin(), p.margins.end(),
-                                          [](const auto& m) { return m.has_value(); })) {
+        if (manual_margins && std::any_of(p.margins.begin(), p.margins.end(), [](const auto& m) {
+                return m.has_value();
+            })) {
             // Character-unit margins are relative to the panel's outer region;
             // screen coordinates are always absolute figure fractions.
             double region_left, region_bottom, region_width, region_height;
@@ -434,8 +450,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 else
                     o << "None";
             }
-            o << "), (" << region_left << ", " << region_bottom << ", "
-              << region_width << ", " << region_height << ")))\n";
+            o << "), (" << region_left << ", " << region_bottom << ", " << region_width << ", "
+              << region_height << ")))\n";
         }
         bool twin = false;
         // Gnuplot matrix coordinates start at (0, 0) in the bottom-left.
@@ -637,8 +653,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << "_gp_palette_values = (_gp_palette_xyz[:-1,2] + "
                      "_gp_palette_xyz[1:,2]) / 2\n";
                 o << "_gp_palette_artist = LineCollection(_gp_palette_segments, "
-                     "cmap=" << cmap_source << ", norm=_gp_palette_norm, linewidths="
-                  << palette_plot.width << ")\n";
+                     "cmap="
+                  << cmap_source << ", norm=_gp_palette_norm, linewidths=" << palette_plot.width
+                  << ")\n";
                 o << "_gp_palette_artist.set_array(_gp_palette_values)\n";
                 o << "ax.add_collection(_gp_palette_artist)\n";
             }
@@ -651,8 +668,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             if (p.colorbox) {
                 if (p.colorbox_position) {
                     const auto& rect = *p.colorbox_position;
-                    o << "_gp_manual_colorbars.append((_gp_palette_artist, (" << rect[0]
-                      << ", " << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
+                    o << "_gp_manual_colorbars.append((_gp_palette_artist, (" << rect[0] << ", "
+                      << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
                       << pystr(p.colors.label) << "))\n";
                 } else {
                     o << "_gp_colorbar = fig.colorbar(_gp_palette_artist, ax=ax)\n";
@@ -752,8 +769,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         std::string last_line_color;
         // Separate positive and negative stacking bases for histogram series.
         o << "_hist_positive = {}\n_hist_negative = {}\n";
-        const auto histogram_count = std::count_if(p.series.begin(), p.series.end(),
-            [](const Series& s) { return s.style == Style::Histograms; });
+        const auto histogram_count =
+            std::count_if(p.series.begin(), p.series.end(), [](const Series& s) {
+                return s.style == Style::Histograms;
+            });
         // Each clustered histogram series has its own bar slot within each x.
         o << "_gp_hist_series = 0\n";
         for (const auto& s : p.series) {
@@ -809,6 +828,28 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             } else if (s.dash_type == 3) {
                 // Gnuplot's line type 0 uses a dotted reference line.
                 o << "kw['linestyle'] = ':'\n";
+            }
+            // Palette coordinates for financial candles and volume bars are
+            // independent of their ordinary style/line type colors.
+            if (!s.palette_values.empty()) {
+                o << "_gp_palette_values = [";
+                for (size_t k = 0; k < s.palette_values.size(); ++k) {
+                    if (k)
+                        o << ", ";
+                    o << std::setprecision(17) << s.palette_values[k];
+                }
+                o << "]\n";
+                if (p.colors.stops.empty() && !p.colors.negative)
+                    o << "_gp_candle_cmap = plt.get_cmap('viridis')\n";
+                else
+                    o << "_gp_candle_cmap = cmap\n";
+                o << "_gp_candle_norm = Normalize(vmin="
+                  << (p.colors.min ? std::to_string(*p.colors.min) : "min(_gp_palette_values)")
+                  << ", vmax="
+                  << (p.colors.max ? std::to_string(*p.colors.max) : "max(_gp_palette_values)")
+                  << ")\n";
+                o << "_gp_palette_colors = [_gp_candle_cmap(_gp_candle_norm(z)) for z in "
+                     "_gp_palette_values]\n";
             }
             if (s.analytic_y) {
                 // The analytic-function translator currently uses Cartesian x.
@@ -896,17 +937,22 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     o << "_cw = " << (p.box_width ? *p.box_width : 0.5) << "\n";
                     // Gnuplot lt 0 is used for dotted notch bounds in libgretl.
                     o << "_cstyle = " << (s.line_type == 0 ? "':'" : "'-'") << "\n";
-                    o << "for _cx, _a, _lo, _hi, _b in zip(x, y, _low, _high, _top):\n";
-                    o << "    target.vlines(_cx, _lo, _hi, color=kw.get('color', 'black'), "
+                    o << "_gp_candle_colors = "
+                      << (s.palette_values.empty() ? "[kw.get('color', 'black')] * len(x)"
+                                                   : "_gp_palette_colors")
+                      << "\n";
+                    o << "for _cx, _a, _lo, _hi, _b, _cc in zip(x, y, _low, _high, _top, "
+                         "_gp_candle_colors):\n";
+                    o << "    target.vlines(_cx, _lo, _hi, color=_cc, "
                          "linewidth=kw['linewidth'], linestyles=_cstyle)\n";
                     o << "    if _a == _b:\n";
                     o << "        target.hlines(_a, _cx-_cw/2, _cx+_cw/2, "
-                         "color=kw.get('color', "
-                         "'black'), linewidth=kw['linewidth'], linestyles=_cstyle)\n";
+                         "color=_cc, linewidth=kw['linewidth'], linestyles=_cstyle)\n";
                     o << "    else:\n";
                     o << "        from matplotlib.patches import Rectangle\n";
                     o << "        target.add_patch(Rectangle((_cx-_cw/2, min(_a,_b)), _cw, "
-                         "abs(_b-_a), fill=False, edgecolor=kw.get('color', 'black'), "
+                         "abs(_b-_a), fill=True, facecolor=_cc, edgecolor=kw.get('color', "
+                         "'black'), "
                          "linewidth=kw['linewidth'], linestyle=_cstyle))\n";
                     break;
                 }
@@ -921,7 +967,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     o << "]\n";
                     o << "kw.pop('linewidth', None)\n";
                     // Apply the global gnuplot fill density to confidence bands.
-                    o << "target.fill_between(x, y, upper, alpha=" << p.fill_alpha
+                    o << "target.fill_between(x, y, upper, alpha="
+                      << p.fill_alpha * s.color_alpha.value_or(1.0)
                       << ", linewidth=0, zorder=0, **kw)\n";
                     break;
                 case Style::ErrorBars: {
@@ -983,8 +1030,9 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     // Rowstacked histograms accumulate contributions at each row index.
                     o << "kw.pop('linewidth', None)\n";
                     if (p.histogram_clustered) {
-                        const double slot = p.box_width.value_or(0.9) /
-                                            (static_cast<double>(histogram_count) + p.histogram_gap);
+                        const double slot =
+                            p.box_width.value_or(0.9) /
+                            (static_cast<double>(histogram_count) + p.histogram_gap);
                         o << "_gp_hist_width = " << std::setprecision(17) << slot << "\n";
                         o << "_gp_hist_x = [v + (_gp_hist_series - (" << histogram_count
                           << " - 1)/2.0) * _gp_hist_width for v in x]\n";
@@ -1054,8 +1102,15 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     } else {
                         // Explicit gnuplot box widths must not be inferred from repeated
                         // values.
-                        o << "target.bar(x, y, width=_box_width, alpha=" << p.fill_alpha
-                          << ", zorder=1, **kw)\n";
+                        if (!s.palette_values.empty()) {
+                            o << "kw.pop('color', None)\n";
+                            o << "target.bar(x, y, width=_box_width, color=_gp_palette_colors, "
+                                 "alpha="
+                              << p.fill_alpha << ", zorder=1, **kw)\n";
+                        } else {
+                            o << "target.bar(x, y, width=_box_width, alpha=" << p.fill_alpha
+                              << ", zorder=1, **kw)\n";
+                        }
                     }
                     break;
                 }
@@ -1162,6 +1217,29 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "ax.set_box_aspect(1)\n";
             o << "ax.set_aspect('equal', adjustable='datalim')\n";
         }
+        // Gnuplot rectangles for Sankey node blocks live in data coordinates.
+        // `noclip` must also show the node strips outside xrange [0:1].
+        for (const auto& rect : p.rectangles) {
+            o << "from matplotlib.patches import Rectangle\n";
+            o << "ax.add_patch(Rectangle((" << std::setprecision(17) << rect.x0 << ", " << rect.y0
+              << "), " << rect.x1 - rect.x0 << ", " << rect.y1 - rect.y0
+              << ", facecolor=" << pystr(rect.color) << ", alpha=" << rect.alpha
+              << ", edgecolor='none', clip_on=" << (rect.clip ? "True" : "False")
+              << ", zorder=2))\n";
+        }
+        // Piechart objects and graph-relative labels must use the same square
+        // axes transform; otherwise screen fractions stretch a circle into an
+        // ellipse on non-square output terminals.
+        if (!p.sectors.empty())
+            o << "ax.set_box_aspect(1)\nax.set_axis_off()\n";
+        for (const auto& sector : p.sectors) {
+            o << "from matplotlib.patches import Wedge\n";
+            o << "ax.add_patch(Wedge((" << std::setprecision(17) << sector.cx << ", " << sector.cy
+              << "), " << sector.radius << ", " << sector.start << ", " << sector.end
+              << ", transform=ax.transAxes, facecolor="
+              << pystr("C" + std::to_string((sector.line_type - 1) % 10))
+              << ", edgecolor='white', linewidth=0.7, clip_on=False, zorder=3))\n";
+        }
         // Gnuplot labels may use either data or axes-relative graph coordinates.
         for (const auto& label : p.labels) {
             if (label.point_marker) {
@@ -1193,6 +1271,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
               << "', va='center'";
             if (label.graph_coordinates)
                 o << ", transform=ax.transAxes";
+            if (!label.text_color.empty())
+                o << ", color=" << pystr(mpl_color(label.text_color));
             o << ")\n";
         }
         // Apply named ticks to primary axes. Secondary x/y tic axes are
@@ -1204,7 +1284,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "ax.set_xticks(list(range(" << p.histogram_categories.size() << ")))\n";
             o << "ax.set_xticklabels([";
             for (size_t j = 0; j < p.histogram_categories.size(); ++j) {
-                if (j) o << ", ";
+                if (j)
+                    o << ", ";
                 o << pystr(p.histogram_categories[j]);
             }
             o << "], rotation=" << p.x.tics.rotation << ")\n";
@@ -1332,19 +1413,24 @@ std::string MatplotlibBackend::generate(const Document& d) const {
              "_gp_char_h = _gp_font_pt / (72 * fig.get_size_inches()[1])\n"
              "for _gp_ax, _gp_margins, _gp_region in _gp_manual_margins:\n"
              "    _gp_rect = _gp_ax.get_position()\n"
-             "    _gp_left, _gp_bottom, _gp_right, _gp_top = (_gp_rect.x0, _gp_rect.y0, _gp_rect.x1, _gp_rect.y1)\n"
+             "    _gp_left, _gp_bottom, _gp_right, _gp_top = (_gp_rect.x0, _gp_rect.y0, "
+             "_gp_rect.x1, _gp_rect.y1)\n"
              "    _gp_rx, _gp_ry, _gp_rw, _gp_rh = _gp_region\n"
              "    for _gp_index, _gp_spec in enumerate(_gp_margins):\n"
              "        if _gp_spec is None: continue\n"
              "        _gp_value, _gp_screen = _gp_spec\n"
              "        _gp_margin = _gp_value * (_gp_char_w if _gp_index < 2 else _gp_char_h)\n"
-             "        if _gp_index == 0: _gp_left = _gp_value if _gp_screen else _gp_rx + _gp_margin\n"
-             "        elif _gp_index == 1: _gp_right = _gp_value if _gp_screen else _gp_rx + _gp_rw - _gp_margin\n"
-             "        elif _gp_index == 2: _gp_bottom = _gp_value if _gp_screen else _gp_ry + _gp_margin\n"
+             "        if _gp_index == 0: _gp_left = _gp_value if _gp_screen else _gp_rx + "
+             "_gp_margin\n"
+             "        elif _gp_index == 1: _gp_right = _gp_value if _gp_screen else _gp_rx + "
+             "_gp_rw - _gp_margin\n"
+             "        elif _gp_index == 2: _gp_bottom = _gp_value if _gp_screen else _gp_ry + "
+             "_gp_margin\n"
              "        else: _gp_top = _gp_value if _gp_screen else _gp_ry + _gp_rh - _gp_margin\n"
              "    if _gp_left >= _gp_right or _gp_bottom >= _gp_top:\n"
              "        raise ValueError('invalid gnuplot margin geometry')\n"
-             "    _gp_ax.set_position([_gp_left, _gp_bottom, _gp_right - _gp_left, _gp_top - _gp_bottom])\n";
+             "    _gp_ax.set_position([_gp_left, _gp_bottom, _gp_right - _gp_left, _gp_top - "
+             "_gp_bottom])\n";
     }
     if (positioned_colorboxes) {
         // Explicit Gnuplot colorboxes use fixed screen coordinates unaffected
