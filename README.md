@@ -152,6 +152,11 @@ silently ignored.
 
 ## Scope and limitations
 
+- The `color_xy` package's `splot $DATA using X:Y:C with lines`, `points` or
+  `linespoints` in `set view map` mode is rendered on 2D axes using a color-mapped
+  line collection and/or scatter points. `set palette negative` and `positive`
+  control color direction; the default Matplotlib palette approximates gnuplot's
+  built-in palette rather than reproducing it exactly.
 - VAR inverse-roots plots are supported: `set polar` interprets inline columns as `(theta, r)` in radians, and `plot 1` draws the unit circle on Cartesian Matplotlib axes. Border/tic suppression, zero reference axes and square plot geometry are also supported more generally. Analytic polar functions and the full gnuplot polar language are not yet supported.
 - gptranslate is **not** a general-purpose gnuplot replacement. Its compatibility target is libgretl and selected gretl package output.
 - `gridplot` layouts support `set multiplot next` (including consecutive skips), overall titles via `set multiplot ... title`, and row-first positioning of nonempty panels. The full behavior of gretl's `gridplot` is **not yet guaranteed**; other grid-style options still require coverage tests.

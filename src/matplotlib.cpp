@@ -330,9 +330,14 @@ std::string MatplotlibBackend::generate(const Document& d) const {
          "FormatStrFormatter, NullFormatter, "
          "AutoMinorLocator\n";
     o << "from matplotlib.colors import LinearSegmentedColormap, Normalize\n";
-    // NumPy is only required for grid-based contour rendering.
+    // Map-view palette lines use a collection with a color for each segment.
     if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
-            return !p.contours.empty() || !p.surfaces.empty();
+            return !p.palette_xy.empty();
+        }))
+        o << "from matplotlib.collections import LineCollection\n";
+    // NumPy is needed for gridded plots and palette-colored trajectories.
+    if (std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+            return !p.contours.empty() || !p.surfaces.empty() || !p.palette_xy.empty();
         }))
         o << "import numpy as np\n";
     o << "from matplotlib.ticker import FuncFormatter\n";
@@ -457,6 +462,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             }
             o << "])\n";
         }
+        if (p.colors.negative) {
+            // Reversal changes the lookup order; cbrange and data stay intact.
+            o << (p.colors.stops.empty() ? "cmap = plt.get_cmap('viridis').reversed()\n"
+                                         : "cmap = cmap.reversed()\n");
+        }
         if (!p.surfaces.empty()) {
             // Grid indices become Gnuplot matrix coordinates; color encodes Z.
             // Explicit XYZ sources instead retain their original coordinates.
@@ -506,11 +516,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     // Un-gridded XYZ points are approximated by triangular faces.
                     o << "_gp_surface = ax.plot_trisurf(_gp_xyz[:,0], _gp_xyz[:,1], "
                          "_gp_xyz[:,2], linewidth=0, antialiased=True, cmap="
-                      << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                      << (p.colors.stops.empty() && !p.colors.negative ? "'viridis'" : "cmap");
                 } else {
                     o << "_gp_surface = ax.plot_surface(_gp_surface_x, _gp_surface_y, "
                          "_gp_surface_z, linewidth=0, antialiased=True, cmap="
-                      << (p.colors.stops.empty() ? "'viridis'" : "cmap");
+                      << (p.colors.stops.empty() && !p.colors.negative ? "'viridis'" : "cmap");
                 }
                 if (p.colors.min || p.colors.max) {
                     o << ", norm=Normalize(vmin="
@@ -570,7 +580,7 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         for (const auto& image : p.images) {
             o << "ax.imshow(" << matrix_numbers(image)
               << ", origin='lower', interpolation='nearest', aspect='auto'";
-            if (!p.colors.stops.empty()) {
+            if (!p.colors.stops.empty() || p.colors.negative) {
                 o << ", cmap=cmap";
             }
             if (p.colors.min || p.colors.max) {
@@ -591,6 +601,61 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                       << pystr(p.colors.label) << "))\n";
                 } else {
                     o << "_gp_colorbar = fig.colorbar(ax.images[-1], ax=ax)\n";
+                    if (!p.colors.label.empty())
+                        o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                }
+            }
+        }
+        // A map-view XYZ splot projects to XY, with time (or another third
+        // column) determining each marker color or line-segment color.
+        for (const auto& palette_plot : p.palette_xy) {
+            o << "_gp_palette_xyz = np.asarray([";
+            o << std::setprecision(17);
+            for (size_t k = 0; k < palette_plot.points.size(); ++k) {
+                if (k)
+                    o << ", ";
+                const auto& point = palette_plot.points[k];
+                o << "[" << point[0] << ", " << point[1] << ", " << point[2] << "]";
+            }
+            o << "], dtype=float)\n";
+            // Automatic cbrange spans point values, not just line-segment
+            // midpoints; both line and marker artists share this norm.
+            o << "_gp_palette_norm = Normalize(vmin="
+              << (p.colors.min ? std::to_string(*p.colors.min)
+                               : "float(np.min(_gp_palette_xyz[:,2]))")
+              << ", vmax="
+              << (p.colors.max ? std::to_string(*p.colors.max)
+                               : "float(np.max(_gp_palette_xyz[:,2]))")
+              << ")\n";
+            const std::string cmap_source =
+                (p.colors.stops.empty() && !p.colors.negative) ? "'viridis'" : "cmap";
+            if (palette_plot.style != Style::Points) {
+                // Segment midpoints approximate gnuplot's palette-interpolated
+                // line colors without changing their original XY coordinates.
+                o << "_gp_palette_segments = np.stack(("
+                     "_gp_palette_xyz[:-1,:2], _gp_palette_xyz[1:,:2]), axis=1)\n";
+                o << "_gp_palette_values = (_gp_palette_xyz[:-1,2] + "
+                     "_gp_palette_xyz[1:,2]) / 2\n";
+                o << "_gp_palette_artist = LineCollection(_gp_palette_segments, "
+                     "cmap=" << cmap_source << ", norm=_gp_palette_norm, linewidths="
+                  << palette_plot.width << ")\n";
+                o << "_gp_palette_artist.set_array(_gp_palette_values)\n";
+                o << "ax.add_collection(_gp_palette_artist)\n";
+            }
+            if (palette_plot.style != Style::Lines) {
+                o << "_gp_palette_artist = ax.scatter(_gp_palette_xyz[:,0], "
+                     "_gp_palette_xyz[:,1], c=_gp_palette_xyz[:,2], cmap="
+                  << cmap_source << ", norm=_gp_palette_norm, zorder=4)\n";
+            }
+            o << "ax.autoscale_view()\n";
+            if (p.colorbox) {
+                if (p.colorbox_position) {
+                    const auto& rect = *p.colorbox_position;
+                    o << "_gp_manual_colorbars.append((_gp_palette_artist, (" << rect[0]
+                      << ", " << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
+                      << pystr(p.colors.label) << "))\n";
+                } else {
+                    o << "_gp_colorbar = fig.colorbar(_gp_palette_artist, ax=ax)\n";
                     if (!p.colors.label.empty())
                         o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
                 }

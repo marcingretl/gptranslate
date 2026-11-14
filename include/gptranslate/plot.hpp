@@ -146,7 +146,15 @@ struct PaletteStop {
 struct ColorScale {
     std::optional<double> min, max;
     std::vector<PaletteStop> stops;
+    // `set palette negative` reverses the color lookup, not the data values.
+    bool negative{false};
     std::string label; // title of the colorbox (set cblabel)
+};
+// A map-view XYZ splot colors XY lines or points by its third data column.
+struct PaletteXY {
+    Style style{Style::Lines};
+    double width{2.0};
+    std::vector<std::array<double, 3>> points; // x, y, palette value
 };
 struct Plot {
     struct Label {
@@ -232,6 +240,7 @@ struct Plot {
     std::vector<ContourGrid> contours;
     // Render real 3D matrix surfaces separately from projected contours.
     std::vector<SurfaceGrid> surfaces;
+    std::vector<PaletteXY> palette_xy;
     std::vector<MatrixLabels> matrix_labels;
     ColorScale colors;
 };

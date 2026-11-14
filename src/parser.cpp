@@ -357,7 +357,8 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
 // Read a named data block as explicit XYZ points selected by 1-based columns.
 // Blank rows delimit Gnuplot scans; dgrid3d treats all scans as scattered data.
 std::vector<std::array<double, 3>> parse_xyz_points(const std::vector<std::string>& rows,
-                                                    const std::array<int, 3>& columns) {
+                                                    const std::array<int, 3>& columns,
+                                                    size_t min_points = 3) {
     std::vector<std::array<double, 3>> points;
     const int max_column = *std::max_element(columns.begin(), columns.end());
     for (const auto& raw : rows) {
@@ -393,8 +394,10 @@ std::vector<std::array<double, 3>> parse_xyz_points(const std::vector<std::strin
         if (!missing)
             points.push_back(point);
     }
-    if (points.size() < 3)
-        throw std::runtime_error("3D XYZ surface requires at least three points");
+    if (points.size() < min_points)
+        throw std::runtime_error(min_points == 3
+                                     ? "3D XYZ surface requires at least three points"
+                                     : "palette plot has no valid XYZ points");
     return points;
 }
 // Parse matrix labels with gnuplot pseudo-columns, sprintf formatting and
@@ -1539,7 +1542,8 @@ ParseResult parse(const std::string& source) {
             if (s == "unset multiplot") {
                 // A trailing configuration-only panel is not a drawable plot.
                 if (d.multiplot && d.plots.size() > 1 && p->series.empty() && p->images.empty() &&
-                    p->contours.empty() && p->surfaces.empty() && p->matrix_labels.empty()) {
+                    p->contours.empty() && p->surfaces.empty() && p->palette_xy.empty() &&
+                    p->matrix_labels.empty()) {
                     d.plots.pop_back();
                     p = &d.plots.back();
                 }
@@ -1549,7 +1553,7 @@ ParseResult parse(const std::string& source) {
                 // Reset plot settings for the next panel without discarding
                 // already parsed panels or document-level output settings.
                 if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                    !p->surfaces.empty() || !p->matrix_labels.empty())
+                    !p->surfaces.empty() || !p->palette_xy.empty() || !p->matrix_labels.empty())
                     throw std::runtime_error("reset after plot data without a new panel");
                 // Reset the gnuplot settings, but preserve the grid cell selected
                 // by earlier plot commands and any set multiplot next skips.
@@ -1674,6 +1678,17 @@ ParseResult parse(const std::string& source) {
                 set_range(range, s);
                 p->colors.min = range.min;
                 p->colors.max = range.max;
+                continue;
+            }
+            // Palette direction is independent of the color-axis range.
+            // Bare `set palette` restores the default positive palette.
+            if (s == "set palette") {
+                p->colors.stops.clear();
+                p->colors.negative = false;
+                continue;
+            }
+            if (s == "set palette negative" || s == "set palette positive") {
+                p->colors.negative = (s == "set palette negative");
                 continue;
             }
             // Only the RGB model is currently mapped to Matplotlib's RGB map.
@@ -1924,6 +1939,35 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "splot ")) {
+                // A view-map XYZ splot uses its third `using` column to color
+                // lines/points in the XY plane (e.g. color_xy's time palette).
+                static const std::regex palette_xy_re(
+                    R"(^splot\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s+using\s+([1-9][0-9]*)\s*:\s*([1-9][0-9]*)\s*:\s*([1-9][0-9]*)\s+with\s+(lines|points|linespoints)(?:\s+lw\s+([0-9]+(?:\.[0-9]+)?))?\s+(?:lt|lc)\s+palette\s*$)");
+                std::smatch palette_match;
+                if (std::regex_match(s, palette_match, palette_xy_re)) {
+                    if (!contour_view_map || !p->surfaces.empty() || !p->series.empty() ||
+                        !p->images.empty() || !p->contours.empty() || !p->matrix_labels.empty())
+                        throw std::runtime_error("unsupported map-view palette splot: " + s);
+                    const auto block = d.data_blocks.find(palette_match[1].str());
+                    if (block == d.data_blocks.end())
+                        throw std::runtime_error("unknown palette data block: " +
+                                                 palette_match[1].str());
+                    PaletteXY palette_plot;
+                    const auto mode = palette_match[5].str();
+                    palette_plot.style = mode == "lines" ? Style::Lines
+                                       : mode == "points" ? Style::Points
+                                                          : Style::LinesPoints;
+                    if (palette_match[6].matched)
+                        palette_plot.width = std::stod(palette_match[6].str());
+                    const std::array<int, 3> columns{std::stoi(palette_match[2].str()),
+                                                     std::stoi(palette_match[3].str()),
+                                                     std::stoi(palette_match[4].str())};
+                    palette_plot.points = parse_xyz_points(block->second, columns, 1);
+                    if (palette_plot.style != Style::Points && palette_plot.points.size() < 2)
+                        throw std::runtime_error("palette lines require at least two points");
+                    p->palette_xy.push_back(std::move(palette_plot));
+                    continue;
+                }
                 // True 3D pm3d surfaces are represented separately from the
                 // existing contour-map interpretation of `splot`.
                 static const std::regex surface_plot_re(
@@ -1938,7 +1982,7 @@ ParseResult parse(const std::string& source) {
                     if (!pm3d_surface || contour_view_map)
                         throw std::runtime_error("unsupported 3D splot: " + s);
                     if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                        !p->matrix_labels.empty())
+                        !p->palette_xy.empty() || !p->matrix_labels.empty())
                         throw std::runtime_error("mixed 2D and 3D plot is unsupported");
                     const auto block = d.data_blocks.find(surface_match[1].str());
                     if (block == d.data_blocks.end())
@@ -1958,7 +2002,7 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("unsupported 3D splot: " + s);
                     // A mixed 2D/3D panel must not silently discard either layer.
                     if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                        !p->matrix_labels.empty())
+                        !p->palette_xy.empty() || !p->matrix_labels.empty())
                         throw std::runtime_error("mixed 2D and 3D plot is unsupported");
                     const auto block = d.data_blocks.find(surface_match[1].str());
                     if (block == d.data_blocks.end())
@@ -2160,7 +2204,7 @@ ParseResult parse(const std::string& source) {
             }
             if (starts(s, "plot ")) {
                 if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                    !p->surfaces.empty()) {
+                    !p->surfaces.empty() || !p->palette_xy.empty()) {
                     const auto panel_index = p->panel_index;
                     d.plots.emplace_back();
                     p = &d.plots.back();
@@ -2611,6 +2655,7 @@ ParseResult parse(const std::string& source) {
                     next.images.clear();
                     next.contours.clear();
                     next.surfaces.clear();
+                    next.palette_xy.clear();
                     next.matrix_labels.clear();
                     d.plots.push_back(std::move(next));
                     p = &d.plots.back();

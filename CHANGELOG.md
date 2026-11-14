@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added support for the `color_xy` package's palette-colored `splot` with
+  `set view map`: a third numeric column now colors XY lines and points,
+  including `linespoints` and the corresponding colorbar. `set palette
+  negative` reverses either a defined or the default Matplotlib palette;
+  `set palette positive` and bare `set palette` restore forward mapping.
+  Added a headless regression covering color direction, segment coordinates,
+  marker values, normalization and colorbar presence. The built-in palette
+  remains an approximation of gnuplot's default colors.
+
 - Improved `gridplot` compatibility with `set multiplot next` for skipped cells and
   figure-level titles in `set multiplot layout ... title ...`. The parser preserves
   panel indices across `reset`, while the Matplotlib backend hides unused cells
