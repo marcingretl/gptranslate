@@ -274,3 +274,7 @@ test('priority5-corresp-ratio', py,
 # Real correspondence analysis emits `font",10"center` without spaces.
 # Verify label coordinates, RGB text color and font size in Matplotlib.
 test('corresp-label-font', py, args: [meson.current_source_dir() / 'tests' / 'check_corresp_label_font.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'corresp-label-font.gp', meson.current_build_dir() / 'corresp-label-font.py'])
+
+# libgretl gridplot sets point sizes for a bounded range of linetypes.
+# Confirm loop expansion, direct overrides and explicit plot-level sizes.
+test('season-linetype-loop', py, args: [meson.current_source_dir() / 'tests' / 'check_season_linetype_loop.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'season-linetype-loop.gp', meson.current_build_dir() / 'season-linetype-loop.py'])

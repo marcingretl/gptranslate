@@ -1232,6 +1232,9 @@ ParseResult parse(const std::string& source) {
         }
     }
     std::map<int, NamedLineStyle> named_line_styles;
+    // Gnuplot linetype point sizes are independent of named line styles and
+    // apply to point-bearing series which select a corresponding line type.
+    std::map<int, double> linetype_point_sizes;
     // Preserve the 2D contour view as parser state. A real 3D splot stays
     // unsupported until the separate surface backend is implemented.
     bool contour_base = false;
@@ -1297,6 +1300,25 @@ ParseResult parse(const std::string& source) {
                     scalar_value(scalar_assignment[2].str(), plot_scalars);
                 continue;
             }
+            // Expand the bounded `set for` form emitted by libgretl gridplot.
+            // Only a repeated linetype point-size assignment is supported:
+            // arbitrary gnuplot loops are not executed by the translator.
+            if (starts(s, "set for ")) {
+                static const std::regex linetype_loop(
+                    R"(^set for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([0-9]+)\s*:\s*([0-9]+)\s*\]\s+linetype\s+\1\s+(?:ps|pointsize)\s+(.+)$)");
+                std::smatch match;
+                if (!std::regex_match(s, match, linetype_loop))
+                    throw std::runtime_error("unsupported set for directive: " + s);
+                const int first = std::stoi(match[2].str());
+                const int last = std::stoi(match[3].str());
+                const auto size = number(match[4].str());
+                if (first < 1 || last < first || last > 256 || !size || !std::isfinite(*size) ||
+                    *size <= 0)
+                    throw std::runtime_error("invalid linetype loop: " + s);
+                for (int n = first; n <= last; ++n)
+                    linetype_point_sizes[n] = *size;
+                continue;
+            }
             // Set the default size for subsequent point-bearing plot items.
             if (starts(s, "set pointsize ")) {
                 const auto size = number(trim(s.substr(14)));
@@ -1345,7 +1367,20 @@ ParseResult parse(const std::string& source) {
                         auto color = keyword_value(s, "lc rgb");
                         if (color.empty())
                             color = keyword_value(s, "lc");
-                        d.linetype_colors[n - 1] = color;
+                        // A size-only directive must preserve an existing
+                        // linetype color rather than clearing it.
+                        if (!color.empty())
+                            d.linetype_colors[n - 1] = color;
+                        // Preserve the point size for explicitly selected line types.
+                        auto ps = keyword_value(s, "ps");
+                        if (ps.empty())
+                            ps = keyword_value(s, "pointsize");
+                        if (!ps.empty()) {
+                            const auto size = number(ps);
+                            if (!size || !std::isfinite(*size) || *size <= 0)
+                                throw std::runtime_error("invalid linetype pointsize: " + s);
+                            linetype_point_sizes[n] = *size;
+                        }
                         // Keep the per-level line width for 2D contour plots.
                         if (const auto width = number(keyword_value(s, "lw"))) {
                             if (*width <= 0 || !std::isfinite(*width))
@@ -1884,6 +1919,7 @@ ParseResult parse(const std::string& source) {
                 *p = Plot{};
                 p->panel_index = panel_index;
                 named_line_styles.clear();
+                linetype_point_sizes.clear();
                 // These flags are global Gnuplot state, not per-plot fields.
                 contour_base = false;
                 contour_view_map = false;
@@ -2856,6 +2892,21 @@ ParseResult parse(const std::string& source) {
                         ser.line_type = it->second.line_type;
                         if (ser.line_type == 0)
                             ser.dash_type = 3;
+                    }
+                    // Apply per-linetype point size after resolving named line
+                    // styles, while preserving the global pointsize multiplier.
+                    if (const auto it = linetype_point_sizes.find(ser.line_type);
+                        it != linetype_point_sizes.end())
+                        ser.point_size *= it->second;
+                    // An explicit plot-item pointsize overrides the linetype size.
+                    auto ps = keyword_value(spec, "ps");
+                    if (ps.empty())
+                        ps = keyword_value(spec, "pointsize");
+                    if (!ps.empty()) {
+                        const auto size = number(ps);
+                        if (!size || !std::isfinite(*size) || *size <= 0)
+                            throw std::runtime_error("invalid plot pointsize: " + ps);
+                        ser.point_size = p->point_size * *size;
                     }
                     // Keep gnuplot line width on both ordinary series and constant
                     // functions.
