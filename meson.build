@@ -156,6 +156,13 @@ test('kmeans-margins', py, args: [meson.current_source_dir() / 'tests' / 'check_
 # Numeric tic sequences from libgretl: incr, start,incr, and start,incr,end.
 test('tics-sequence', py, args: [meson.current_source_dir() / 'tests' / 'check_tics_sequence.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'tics-sequence.gp', meson.current_build_dir() / 'tics-sequence.py'])
 
+# coefcomp emits categorical tic lists after nomirror; retain modifiers on
+# either side of the list and preserve punctuation within quoted labels.
+test('coefcomp-named-tics-modifiers', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_coefcomp_named_tics.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'coefcomp-named-tics-modifiers.gp',
+         meson.current_build_dir() / 'coefcomp-named-tics-modifiers.py'])
+
 # SVAR FEVD uses external numeric data, reused via an empty filename, and
 # rowstacked histograms selected by `set style data histogram`.
 test('svar-fevd', py, args: [meson.current_source_dir() / 'tests' / 'check_fevd.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'fevd-debug.gp'])
@@ -278,3 +285,7 @@ test('corresp-label-font', py, args: [meson.current_source_dir() / 'tests' / 'ch
 # libgretl gridplot sets point sizes for a bounded range of linetypes.
 # Confirm loop expansion, direct overrides and explicit plot-level sizes.
 test('season-linetype-loop', py, args: [meson.current_source_dir() / 'tests' / 'check_season_linetype_loop.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'season-linetype-loop.gp', meson.current_build_dir() / 'season-linetype-loop.py'])
+
+# coefcomp uses xerrorbars from a named block for horizontal confidence
+# intervals. Check symmetric/asymmetric bounds and preserve yerrorbars.
+test('coefcomp-xerrorbars', py, args: [meson.current_source_dir() / 'tests' / 'check_coefcomp_xerrorbars.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'coefcomp-xerrorbars.gp', meson.current_build_dir() / 'coefcomp-xerrorbars.py'])

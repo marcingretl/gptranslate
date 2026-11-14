@@ -520,12 +520,45 @@ std::vector<std::string> split_commands(const std::string& line) {
 // Parse named tic positions without conflating commas inside quoted labels.
 void parse_tics(Tics& tics, const std::string& spec) {
     tics.enabled = true;
-    const auto items_begin = spec.find('(');
-    if (items_begin != std::string::npos && trim(spec.substr(0, items_begin)).empty()) {
-        const auto items_end = spec.find(')', items_begin);
-        if (items_end == std::string::npos) {
-            throw std::runtime_error("unterminated tic list");
+    // A named tic list may follow modifiers, e.g. `set ytics nomirror ("A" 1)`.
+    // Find only unquoted parentheses so a format string cannot be mistaken
+    // for an explicit tic list.
+    size_t items_begin = std::string::npos;
+    char quote = 0;
+    for (size_t i = 0; i < spec.size(); ++i) {
+        const char c = spec[i];
+        if (quote) {
+            if (c == quote && (i == 0 || spec[i - 1] != '\\'))
+                quote = 0;
+        } else if (c == '\'' || c == '"') {
+            quote = c;
+        } else if (c == '(') {
+            items_begin = i;
+            break;
         }
+    }
+    if (items_begin != std::string::npos) {
+        // Preserve the left-to-right precedence of modifiers on either side
+        // of the list, without discarding existing tick positions prematurely.
+        const auto leading = trim(spec.substr(0, items_begin));
+        if (!leading.empty())
+            parse_tics(tics, leading);
+        size_t items_end = std::string::npos;
+        quote = 0;
+        for (size_t i = items_begin + 1; i < spec.size(); ++i) {
+            const char c = spec[i];
+            if (quote) {
+                if (c == quote && (i == 0 || spec[i - 1] != '\\'))
+                    quote = 0;
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == ')') {
+                items_end = i;
+                break;
+            }
+        }
+        if (items_end == std::string::npos)
+            throw std::runtime_error("unterminated tic list");
         tics.explicit_tics.clear();
         for (const auto& item :
              split_specs(spec.substr(items_begin + 1, items_end - items_begin - 1))) {
@@ -2798,6 +2831,14 @@ ParseResult parse(const std::string& source) {
                     if (ser.color.empty()) {
                         ser.color = keyword_value(spec, "linecolor rgb");
                     }
+                    if (ser.color.empty()) {
+                        // coefcomp emits `lc black` without `rgb`. Do not
+                        // mistake palette or variable color modes for names.
+                        const auto plain_color = keyword_value(spec, "lc");
+                        if (plain_color != "rgb" && plain_color != "palette" &&
+                            plain_color != "variable" && plain_color != "lt")
+                            ser.color = plain_color;
+                    }
                     if (ser.color.size() == 10 && starts(ser.color, "0x")) {
                         const auto hex = ser.color.substr(2);
                         if (hex.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
@@ -2841,6 +2882,9 @@ ParseResult parse(const std::string& source) {
                                style == "errorbar" || style == "yerrorbar") {
                         // The unqualified gnuplot errorbars style represents y errors.
                         ser.style = Style::ErrorBars;
+                    } else if (style == "xerrorbars" || style == "xerrorbar") {
+                        // Horizontal bars express uncertainty in x, rather than y.
+                        ser.style = Style::XErrorBars;
                     } else {
                         throw std::runtime_error("unsupported plot style: " + style);
                     }
@@ -2965,13 +3009,14 @@ ParseResult parse(const std::string& source) {
                     const bool palette_box =
                         ser.style == Style::Boxes && spec.find(" palette") != std::string::npos;
                     const bool filled = ser.style == Style::FilledCurve;
-                    const bool errorbars = ser.style == Style::ErrorBars;
+                    const bool errorbars = ser.style == Style::ErrorBars ||
+                                           ser.style == Style::XErrorBars;
                     const auto using_pos = using_offset(spec);
                     const bool has_using = using_pos.has_value();
-                    // Error bars accept x:y:dy or x:y:ylow:yhigh, including
-                    // explicit column expressions. Without `using`, the data
-                    // row length determines whether a symmetric or asymmetric
-                    // interval was supplied.
+                    // Vertical and horizontal error bars accept a symmetric
+                    // third field or explicit lower/upper limits in four fields.
+                    // `using` expressions and implicit columns share the same
+                    // interpretation, with the error axis determined by style.
                     std::vector<std::string> error_fields;
                     if (errorbars && has_using) {
                         try {
@@ -3103,7 +3148,7 @@ ParseResult parse(const std::string& source) {
                             // the point estimate, so no symmetry is assumed.
                             std::vector<std::optional<double>> values;
                             if (error_fields.empty()) {
-                                // Without `using`, read x:y:dy or x:y:ylow:yhigh.
+                                // Without `using`, read x:y:delta or x:y:low:high.
                                 for (size_t col = 0; col < std::min<size_t>(cells.size(), 4); ++col)
                                     values.push_back(number(cells[col]));
                             } else {
@@ -3115,12 +3160,16 @@ ParseResult parse(const std::string& source) {
                             if (std::all_of(values.begin(), values.end(), [](const auto& v) {
                                     return v.has_value();
                                 })) {
-                                const double center = *values[1];
+                                // Bounds apply to x for xerrorbars and to y for
+                                // yerrorbars. Preserve the actual estimate even
+                                // when it lies outside an asymmetric interval.
+                                const double center = ser.style == Style::XErrorBars
+                                                          ? *values[0] : *values[1];
                                 const double lo =
                                     values.size() == 3 ? center - std::abs(*values[2]) : *values[2];
                                 const double hi =
                                     values.size() == 3 ? center + std::abs(*values[2]) : *values[3];
-                                ser.points.push_back({*values[0], center});
+                                ser.points.push_back({*values[0], *values[1]});
                                 ser.lower.push_back(lo);
                                 ser.upper.push_back(hi);
                             }

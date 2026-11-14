@@ -857,8 +857,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // the median and the two dotted notch boundaries.
             if (s.style == Style::Candlesticks) {
                 o << "\nkw['color'] = '#E76F00'";
-            } else if (s.style == Style::ErrorBars && !s.explicit_color &&
-                       !last_line_color.empty()) {
+            } else if ((s.style == Style::ErrorBars || s.style == Style::XErrorBars) &&
+                       !s.explicit_color && !last_line_color.empty()) {
                 // libgretl emits each IRF line immediately before its error bars.
                 o << "\nkw['color'] = " << pystr(last_line_color);
             } else if (contrast_plot && !s.explicit_color && s.style != Style::FilledCurve) {
@@ -1034,11 +1034,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                       << p.fill_alpha * s.color_alpha.value_or(1.0)
                       << ", linewidth=0, zorder=0, **kw)\n";
                     break;
-                case Style::ErrorBars: {
+                case Style::ErrorBars:
+                case Style::XErrorBars: {
                     // Matplotlib requires nonnegative errors relative to the central
-                    // value. gretl's bootstrap quantile interval can exclude the
-                    // point estimate, so use the interval midpoint for the whiskers,
-                    // then draw the actual estimate as a separate point marker.
+                    // value. Asymmetric confidence intervals can exclude the
+                    // point estimate, so use their midpoint for the whiskers and
+                    // draw the actual estimate as a separate point marker.
                     o << "lower = [";
                     for (size_t j = 0; j < s.lower.size(); ++j) {
                         if (j)
@@ -1053,11 +1054,21 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     }
                     o << "]\n";
                     o << "_mid = [(lo + hi) / 2 for lo, hi in zip(lower, upper)]\n";
-                    o << "_yerr = [[mid - lo for mid, lo in zip(_mid, lower)], "
-                         "[hi - mid for mid, hi in zip(_mid, upper)]]\n";
-                    o << "target.errorbar(x, _mid, yerr=_yerr, fmt='none', "
-                         "ecolor=kw.get('color', 'C0'), elinewidth=kw['linewidth'], "
-                         "capsize=2, label=kw['label'], zorder=2)\n";
+                    if (s.style == Style::XErrorBars) {
+                        // Horizontal whiskers are centered at interval midpoints;
+                        // their y positions remain those of the estimates.
+                        o << "_xerr = [[mid - lo for mid, lo in zip(_mid, lower)], "
+                             "[hi - mid for mid, hi in zip(_mid, upper)]]\n";
+                        o << "target.errorbar(_mid, y, xerr=_xerr, fmt='none', "
+                             "ecolor=kw.get('color', 'C0'), elinewidth=kw['linewidth'], "
+                             "capsize=2, label=kw['label'], zorder=2)\n";
+                    } else {
+                        o << "_yerr = [[mid - lo for mid, lo in zip(_mid, lower)], "
+                             "[hi - mid for mid, hi in zip(_mid, upper)]]\n";
+                        o << "target.errorbar(x, _mid, yerr=_yerr, fmt='none', "
+                             "ecolor=kw.get('color', 'C0'), elinewidth=kw['linewidth'], "
+                             "capsize=2, label=kw['label'], zorder=2)\n";
+                    }
                     // Use a distinct marker collection to preserve the actual
                     // estimate, which is not necessarily the midpoint.
                     o << "target.scatter(x, y, s=12, color=kw.get('color', 'C0'), "

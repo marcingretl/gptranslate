@@ -38,6 +38,7 @@ enum class Style {
     Dots,
     FilledCurve,
     ErrorBars,
+    XErrorBars,
     Candlesticks
 };
 struct Series {
