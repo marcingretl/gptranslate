@@ -239,3 +239,7 @@ test('heatmap-colorbox-reset', py, args: [meson.current_source_dir() / 'tests' /
 # CUB numbers multiple confidence ellipses and may parenthesize signed terms.
 # Reuse the restricted libgretl parametric translator, preserving all curves.
 test('cub-parametric-ellipses', py, args: [meson.current_source_dir() / 'tests' / 'check_cub_parametric.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cub-parametric-ellipses.gp', meson.current_build_dir() / 'cub-parametric-ellipses.py'])
+
+# Symbolic pi bounds in CUB's parametric ellipses also permit unary signs;
+# unsupported range expressions must still be rejected explicitly.
+test('cub-parametric-trange-signed', py, args: [meson.current_source_dir() / 'tests' / 'check_cub_trange_signed.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cub-parametric-trange-signed.gp', meson.current_build_dir() / 'cub-parametric-trange-signed.py'])

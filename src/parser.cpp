@@ -1232,11 +1232,31 @@ ParseResult parse(const std::string& source) {
                 continue;
             }
             if (starts(s, "set trange ")) {
-                Axis range;
-                set_range(range, s);
-                if (!range.min || !range.max || *range.max <= *range.min)
-                    throw std::runtime_error("invalid parametric trange");
-                trange = {*range.min, *range.max};
+                // Gnuplot permits pi-based bounds in parametric ranges,
+                // e.g. [0:2*pi] or [-pi:pi]. Reuse the restricted numeric
+                // tic parser rather than evaluating general expressions.
+                const auto left = s.find('[');
+                const auto colon = s.find(':', left);
+                const auto right = s.find(']', colon);
+                if (left == s.npos || colon == s.npos || right == s.npos)
+                    throw std::runtime_error("invalid parametric trange: " + s);
+                const auto bound = [](std::string value) -> std::optional<double> {
+                    value = trim(value);
+                    if (auto result = tic_position(value))
+                        return result;
+                    // tic_position() handles unsigned multiples of pi;
+                    // parametric bounds may also have a unary sign.
+                    if (!value.empty() && (value.front() == '-' || value.front() == '+')) {
+                        if (auto result = tic_position(value.substr(1)))
+                            return value.front() == '-' ? -*result : *result;
+                    }
+                    return {};
+                };
+                const auto minimum = bound(s.substr(left + 1, colon - left - 1));
+                const auto maximum = bound(s.substr(colon + 1, right - colon - 1));
+                if (!minimum || !maximum || *maximum <= *minimum)
+                    throw std::runtime_error("invalid parametric trange: " + s);
+                trange = {*minimum, *maximum};
                 continue;
             }
             // Restrict assignments to the xN(t)/yN(t) ellipse family.
