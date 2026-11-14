@@ -183,6 +183,13 @@ struct Plot {
     // Gnuplot multiplot placement, normalized to the figure dimensions.
     double origin_x{0.0}, origin_y{0.0};
     double size_x{1.0}, size_y{1.0};
+    // Optional manual margins in gnuplot order: left, right, bottom, top.
+    // Values are character units unless `at screen` was selected.
+    struct Margin {
+        double value{};
+        bool at_screen{false};
+    };
+    std::array<std::optional<Margin>, 4> margins;
     std::string title;
     // Zero-based cell in a multiplot layout; skipped cells have no Plot.
     std::size_t panel_index{0};

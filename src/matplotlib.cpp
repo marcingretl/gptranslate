@@ -298,6 +298,13 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
             return p.colorbox && p.colorbox_position.has_value();
         });
+    // Apply explicit gnuplot margins only after automatic Matplotlib layout.
+    const bool manual_margins =
+        std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
+            return std::any_of(p.margins.begin(), p.margins.end(), [](const auto& m) {
+                return m.has_value();
+            });
+        });
     // Register hover handling only when the plot contains visible point markers.
     // Lines and synthetic reference curves must not trigger a tooltip.
     const bool hover_points = std::any_of(d.plots.begin(), d.plots.end(), [](const Plot& p) {
@@ -354,6 +361,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         o << "fig.suptitle(" << pystr(d.multiplot_title) << ")\n";
     if (positioned_colorboxes)
         o << "_gp_manual_colorbars = []\n";
+    if (manual_margins)
+        o << "_gp_manual_margins = []\n";
     for (size_t j = 0; j < d.plots.size(); ++j) {
         const auto& p = d.plots[j];
         if (d.positioned_multiplot) {
@@ -391,6 +400,37 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                   << ", projection='3d')\n";
                 o << "axes[" << p.panel_index << "] = ax\n";
             }
+        }
+        if (manual_margins && std::any_of(p.margins.begin(), p.margins.end(),
+                                          [](const auto& m) { return m.has_value(); })) {
+            // Character-unit margins are relative to the panel's outer region;
+            // screen coordinates are always absolute figure fractions.
+            double region_left, region_bottom, region_width, region_height;
+            if (d.positioned_multiplot) {
+                region_left = 0.04 + 0.92 * p.origin_x;
+                region_bottom = 0.04 + 0.92 * p.origin_y;
+                region_width = 0.92 * p.size_x;
+                region_height = 0.92 * p.size_y;
+            } else {
+                const int cols = d.multiplot ? d.cols : 1;
+                const int rows = d.multiplot ? d.rows : 1;
+                region_left = static_cast<double>(p.panel_index % cols) / cols;
+                region_bottom = 1.0 - static_cast<double>(p.panel_index / cols + 1) / rows;
+                region_width = 1.0 / cols;
+                region_height = 1.0 / rows;
+            }
+            o << "_gp_manual_margins.append((ax, (";
+            for (size_t side = 0; side < p.margins.size(); ++side) {
+                if (side)
+                    o << ", ";
+                if (p.margins[side])
+                    o << "(" << p.margins[side]->value << ", "
+                      << (p.margins[side]->at_screen ? "True" : "False") << ")";
+                else
+                    o << "None";
+            }
+            o << "), (" << region_left << ", " << region_bottom << ", "
+              << region_width << ", " << region_height << ")))\n";
         }
         bool twin = false;
         // Gnuplot matrix coordinates start at (0, 0) in the bottom-left.
@@ -1193,6 +1233,29 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         // tight_layout also accounts for legends attached outside the axes.
         o << (d.multiplot_title.empty() ? "fig.tight_layout()\n"
                                         : "fig.tight_layout(rect=(0, 0, 1, 0.94))\n");
+    }
+    if (manual_margins) {
+        // Apply margins after tight_layout, otherwise it would overwrite the
+        // manually requested axis bounds. Character dimensions approximate
+        // gnuplot's terminal font using Matplotlib's configured point size.
+        o << "_gp_font_pt = plt.rcParams['font.size']\n"
+             "_gp_char_w = 0.6 * _gp_font_pt / (72 * fig.get_size_inches()[0])\n"
+             "_gp_char_h = _gp_font_pt / (72 * fig.get_size_inches()[1])\n"
+             "for _gp_ax, _gp_margins, _gp_region in _gp_manual_margins:\n"
+             "    _gp_rect = _gp_ax.get_position()\n"
+             "    _gp_left, _gp_bottom, _gp_right, _gp_top = (_gp_rect.x0, _gp_rect.y0, _gp_rect.x1, _gp_rect.y1)\n"
+             "    _gp_rx, _gp_ry, _gp_rw, _gp_rh = _gp_region\n"
+             "    for _gp_index, _gp_spec in enumerate(_gp_margins):\n"
+             "        if _gp_spec is None: continue\n"
+             "        _gp_value, _gp_screen = _gp_spec\n"
+             "        _gp_margin = _gp_value * (_gp_char_w if _gp_index < 2 else _gp_char_h)\n"
+             "        if _gp_index == 0: _gp_left = _gp_value if _gp_screen else _gp_rx + _gp_margin\n"
+             "        elif _gp_index == 1: _gp_right = _gp_value if _gp_screen else _gp_rx + _gp_rw - _gp_margin\n"
+             "        elif _gp_index == 2: _gp_bottom = _gp_value if _gp_screen else _gp_ry + _gp_margin\n"
+             "        else: _gp_top = _gp_value if _gp_screen else _gp_ry + _gp_rh - _gp_margin\n"
+             "    if _gp_left >= _gp_right or _gp_bottom >= _gp_top:\n"
+             "        raise ValueError('invalid gnuplot margin geometry')\n"
+             "    _gp_ax.set_position([_gp_left, _gp_bottom, _gp_right - _gp_left, _gp_top - _gp_bottom])\n";
     }
     if (positioned_colorboxes) {
         // Explicit Gnuplot colorboxes use fixed screen coordinates unaffected

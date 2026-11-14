@@ -146,6 +146,9 @@ test('panplot-stack', py, args: [meson.current_source_dir() / 'tests' / 'check_p
 # Tick-label offsets retain character-space x/y shifts and nooffset resets.
 test('tics-offset', py, args: [meson.current_source_dir() / 'tests' / 'check_tics_offset.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'tics-offset.gp', meson.current_build_dir() / 'tics-offset.py'])
 
+# Numeric and screen-unit margins preserve explicit plotting geometry.
+test('kmeans-margins', py, args: [meson.current_source_dir() / 'tests' / 'check_kmeans_margins.py', exe.full_path(), meson.current_source_dir() / 'tests', meson.current_build_dir()])
+
 # Numeric tic sequences from libgretl: incr, start,incr, and start,incr,end.
 test('tics-sequence', py, args: [meson.current_source_dir() / 'tests' / 'check_tics_sequence.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'tics-sequence.gp', meson.current_build_dir() / 'tics-sequence.py'])
 

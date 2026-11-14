@@ -1363,10 +1363,37 @@ ParseResult parse(const std::string& source) {
                 }
                 continue;
             }
-            // Accept gnuplot margin settings; matplotlib layout is handled
-            // separately.
-            if (starts(s, "set bmargin ")) {
-                continue;
+            // Gnuplot margin values are measured in characters; `at screen`
+            // instead specifies an absolute fraction of the full figure.
+            // An omitted or negative character margin restores automatic layout.
+            {
+                static const std::regex margin_re(
+                    R"(^(set|unset) ([lrbt])margin(?:\s+(.*))?$)");
+                std::smatch margin_match;
+                if (std::regex_match(s, margin_match, margin_re)) {
+                    const std::string side = margin_match[2].str();
+                    const auto index = std::string("lrbt").find(side);
+                    auto& margin = p->margins[index];
+                    std::string spec = trim(margin_match[3].str());
+                    if (margin_match[1] == "unset" || spec.empty()) {
+                        if (margin_match[1] == "unset" && !spec.empty())
+                            throw std::runtime_error("invalid margin directive: " + s);
+                        margin.reset();
+                    } else {
+                        const bool screen = starts(spec, "at screen ");
+                        if (screen)
+                            spec = trim(spec.substr(std::string("at screen ").size()));
+                        const auto value = number(spec);
+                        if (!value || !std::isfinite(*value) ||
+                            (screen && (*value < 0.0 || *value > 1.0)))
+                            throw std::runtime_error("invalid margin directive: " + s);
+                        if (!screen && *value < 0.0)
+                            margin.reset();
+                        else
+                            margin = Plot::Margin{*value, screen};
+                    }
+                    continue;
+                }
             }
             // Approximate solid fill density; border styling uses matplotlib
             // defaults.
