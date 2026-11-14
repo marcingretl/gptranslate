@@ -243,3 +243,7 @@ test('cub-parametric-ellipses', py, args: [meson.current_source_dir() / 'tests' 
 # Symbolic pi bounds in CUB's parametric ellipses also permit unary signs;
 # unsupported range expressions must still be rejected explicitly.
 test('cub-parametric-trange-signed', py, args: [meson.current_source_dir() / 'tests' / 'check_cub_trange_signed.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cub-parametric-trange-signed.gp', meson.current_build_dir() / 'cub-parametric-trange-signed.py'])
+
+# CUB combines several parametric ellipse pairs with an inline data source in
+# a single plot command. Both must be parsed and drawn in their original order.
+test('cub-parametric-mixed-inline', py, args: [meson.current_source_dir() / 'tests' / 'check_cub_parametric_mixed.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cub-parametric-mixed-inline.gp', meson.current_build_dir() / 'cub-parametric-mixed-inline.py'])

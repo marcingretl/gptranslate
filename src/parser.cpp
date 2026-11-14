@@ -217,11 +217,11 @@ std::array<double, 3> ellipse_function(const std::string& text, const std::strin
     std::string expression = match[1].str();
     // Gnuplot allows a signed trigonometric term in redundant parentheses,
     // e.g. A*cos(t) + (-B*sin(t)) + C. Remove only this validated form.
-    expression.erase(std::remove_if(expression.begin(), expression.end(), [](unsigned char c) {
-                         return std::isspace(c);
-                     }), expression.end());
-    const std::regex parenthesized("\\((" + numeric +
-                                   R"(\*(?:cos|sin)\(t\))\))");
+    expression.erase(std::remove_if(expression.begin(),
+                                    expression.end(),
+                                    [](unsigned char c) { return std::isspace(c); }),
+                     expression.end());
+    const std::regex parenthesized("\\((" + numeric + R"(\*(?:cos|sin)\(t\))\))");
     expression = std::regex_replace(expression, parenthesized, "$1");
     // Capture the two signed trigonometric coefficients and the intercept;
     // a plus/minus preceding a coefficient is applied separately.
@@ -234,17 +234,17 @@ std::array<double, 3> ellipse_function(const std::string& text, const std::strin
     const auto constant = number(match[5].str());
     if (!cos_value || !sin_value || !constant)
         throw std::runtime_error("invalid coefficient in parametric definition");
-    return {*cos_value, (match[2] == "-" ? -1.0 : 1.0) * *sin_value,
+    return {*cos_value,
+            (match[2] == "-" ? -1.0 : 1.0) * *sin_value,
             (match[4] == "-" ? -1.0 : 1.0) * *constant};
 }
 // Sample a restricted pair of parametric functions into the ordinary Plot IR.
 // Parametric support is scoped to the syntax emitted by libgretl's confidence
 // ellipse plot; unsupported expressions remain explicit translation errors.
-std::vector<Series> ellipse_series(
-    const std::string& command,
-    const std::map<std::string, std::array<double, 3>>& functions,
-    const std::pair<double, double>& trange,
-    const std::vector<std::string>& colors) {
+std::vector<Series> ellipse_series(const std::string& command,
+                                   const std::map<std::string, std::array<double, 3>>& functions,
+                                   const std::pair<double, double>& trange,
+                                   const std::vector<std::string>& colors) {
     const auto specs = split_specs(command);
     if (specs.size() % 2 != 0 || specs.empty())
         throw std::runtime_error("parametric plot requires x(t), y(t) pairs");
@@ -275,8 +275,8 @@ std::vector<Series> ellipse_series(
             throw std::runtime_error("unsupported parametric series style: " + yspec);
         // Resolve each numbered definition independently, so different curves
         // in one plot can have distinct centers and covariance matrices.
-        const auto resolve = [&](const std::string& source, char axis)
-            -> const std::array<double, 3>* {
+        const auto resolve = [&](const std::string& source,
+                                 char axis) -> const std::array<double, 3>* {
             if (number(source))
                 return nullptr;
             const auto name = source.substr(0, source.find('('));
@@ -303,10 +303,12 @@ std::vector<Series> ellipse_series(
         // the source supplies an explicit trange.
         for (int k = 0; k <= 400; ++k) {
             const double t = trange.first + (trange.second - trange.first) * k / 400;
-            const double x = xconst ? *xconst :
-                ((*xdef)[0] * std::cos(t) + (*xdef)[1] * std::sin(t) + (*xdef)[2]);
-            const double y = yconst ? *yconst :
-                ((*ydef)[0] * std::cos(t) + (*ydef)[1] * std::sin(t) + (*ydef)[2]);
+            const double x = xconst
+                               ? *xconst
+                               : ((*xdef)[0] * std::cos(t) + (*xdef)[1] * std::sin(t) + (*xdef)[2]);
+            const double y = yconst
+                               ? *yconst
+                               : ((*ydef)[0] * std::cos(t) + (*ydef)[1] * std::sin(t) + (*ydef)[2]);
             ser.points.push_back({x, y});
         }
         series.push_back(std::move(ser));
@@ -2123,21 +2125,46 @@ ParseResult parse(const std::string& source) {
                     command.pop_back();
                     command += " " + trim(lines[++i]);
                 }
-                if (parametric) {
-                    auto lines = ellipse_series(
-                        command, parametric_functions, trange, d.linetype_colors);
-                    p->series.insert(p->series.end(), lines.begin(), lines.end());
-                    p->legend = false;
-                    continue;
-                }
                 auto specs = split_specs(command, decimal_comma);
-                for (const auto& spec : specs) {
+                // Parametric functions and data sources can coexist in a single
+                // gnuplot plot command. CUB places ellipse pairs before the
+                // original inline observations; the latter must still consume
+                // their data rows through the ordinary series parser.
+                static const std::regex parametric_x(R"(^x[0-9]*\(t\)$)");
+                static const std::regex parametric_y(R"(^y[0-9]*\(t\)$)");
+                bool has_parametric_pairs = false;
+                bool has_ordinary_sources = false;
+                for (size_t spec_index = 0; spec_index < specs.size(); ++spec_index) {
+                    const auto& spec = specs[spec_index];
                     if (spec.empty()) {
                         continue;
                     }
                     std::istringstream st(spec);
                     std::string src;
                     st >> src;
+                    // Keep numeric x coordinates paired with named y functions,
+                    // as allowed by the existing restricted ellipse translator.
+                    bool pair_start = parametric && std::regex_match(src, parametric_x);
+                    if (parametric && !pair_start && number(src) && spec_index + 1 < specs.size()) {
+                        std::istringstream next_stream(specs[spec_index + 1]);
+                        std::string next_source;
+                        next_stream >> next_source;
+                        pair_start = std::regex_match(next_source, parametric_y);
+                    }
+                    if (pair_start) {
+                        if (spec_index + 1 >= specs.size())
+                            throw std::runtime_error("parametric plot requires x(t), y(t) pairs");
+                        auto curves = ellipse_series(spec + ", " + specs[++spec_index],
+                                                     parametric_functions,
+                                                     trange,
+                                                     d.linetype_colors);
+                        p->series.insert(p->series.end(), curves.begin(), curves.end());
+                        has_parametric_pairs = true;
+                        continue;
+                    }
+                    if (parametric && std::regex_match(src, parametric_y))
+                        throw std::runtime_error("parametric y(t) without preceding x(t): " + spec);
+                    has_ordinary_sources = true;
                     // Empty quoted filenames reuse the preceding external plot source.
                     if (src == "''" || src == "\"\"") {
                         if (previous_file.empty())
@@ -2499,6 +2526,10 @@ ParseResult parse(const std::string& source) {
                     }
                     p->series.push_back(std::move(ser));
                 }
+                // Preserve the prior no-legend behavior for purely parametric
+                // ellipse plots. Mixed plots retain the ordinary data labels.
+                if (has_parametric_pairs && !has_ordinary_sources)
+                    p->legend = false;
                 if (d.multiplot) {
                     // Gnuplot retains axis/style settings between panels. Each subsequent
                     // panel starts with a snapshot, while plotted data remain
