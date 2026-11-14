@@ -235,3 +235,7 @@ test('heatmap-surface-xyz', py, args: [meson.current_source_dir() / 'tests' / 'c
 test('heatmap-colorbox-user-3d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-user-3d.gp', meson.current_build_dir() / 'heatmap-colorbox-user-3d.py', '3d'])
 test('heatmap-colorbox-user-2d', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-user-2d.gp', meson.current_build_dir() / 'heatmap-colorbox-user-2d.py', 'rectilinear'])
 test('heatmap-colorbox-reset', py, args: [meson.current_source_dir() / 'tests' / 'check_heatmap_colorbox_user.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'heatmap-colorbox-reset.gp', meson.current_build_dir() / 'heatmap-colorbox-reset.py', 'reset'])
+
+# CUB numbers multiple confidence ellipses and may parenthesize signed terms.
+# Reuse the restricted libgretl parametric translator, preserving all curves.
+test('cub-parametric-ellipses', py, args: [meson.current_source_dir() / 'tests' / 'check_cub_parametric.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'cub-parametric-ellipses.gp', meson.current_build_dir() / 'cub-parametric-ellipses.py'])

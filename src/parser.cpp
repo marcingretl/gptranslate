@@ -205,36 +205,52 @@ std::optional<double> tic_position(const std::string& text) {
 // Read libgretl's affine trigonometric x(t)/y(t) definitions. These
 // equations describe the ellipse and its marginal confidence boundaries.
 // Arbitrary gnuplot functions are not executed or silently approximated.
-std::array<double, 3> ellipse_function(const std::string& text, char axis) {
+// Numbered function names and parenthesized signed terms are also used by
+// contributed packages such as CUB for multiple confidence ellipses.
+std::array<double, 3> ellipse_function(const std::string& text, const std::string& name) {
     static const std::string numeric =
-        R"(([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?))";
-    const std::regex definition("^" + std::string(1, axis) + R"(\(t\)\s*=\s*)" + numeric +
-                                R"(\*cos\(t\)\s*)" + numeric + R"(\*sin\(t\)\s*)" + numeric +
-                                R"(\s*$)");
+        R"([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)";
+    const std::regex definition("^" + name + R"(\(t\)\s*=\s*(.*)$)");
     std::smatch match;
     if (!std::regex_match(text, match, definition))
         throw std::runtime_error("unsupported parametric definition: " + text);
-    std::array<double, 3> out{};
-    for (int i = 0; i < 3; ++i) {
-        const auto value = number(match[i + 1].str());
-        if (!value)
-            throw std::runtime_error("invalid coefficient in parametric definition");
-        out[i] = *value;
-    }
-    return out;
+    std::string expression = match[1].str();
+    // Gnuplot allows a signed trigonometric term in redundant parentheses,
+    // e.g. A*cos(t) + (-B*sin(t)) + C. Remove only this validated form.
+    expression.erase(std::remove_if(expression.begin(), expression.end(), [](unsigned char c) {
+                         return std::isspace(c);
+                     }), expression.end());
+    const std::regex parenthesized("\\((" + numeric +
+                                   R"(\*(?:cos|sin)\(t\))\))");
+    expression = std::regex_replace(expression, parenthesized, "$1");
+    // Capture the two signed trigonometric coefficients and the intercept;
+    // a plus/minus preceding a coefficient is applied separately.
+    const std::regex affine("^(" + numeric + R"()\*cos\(t\)([+-])()" + numeric +
+                            R"()\*sin\(t\)([+-])()" + numeric + ")$");
+    if (!std::regex_match(expression, match, affine))
+        throw std::runtime_error("unsupported parametric definition: " + text);
+    const auto cos_value = number(match[1].str());
+    const auto sin_value = number(match[3].str());
+    const auto constant = number(match[5].str());
+    if (!cos_value || !sin_value || !constant)
+        throw std::runtime_error("invalid coefficient in parametric definition");
+    return {*cos_value, (match[2] == "-" ? -1.0 : 1.0) * *sin_value,
+            (match[4] == "-" ? -1.0 : 1.0) * *constant};
 }
 // Sample a restricted pair of parametric functions into the ordinary Plot IR.
 // Parametric support is scoped to the syntax emitted by libgretl's confidence
 // ellipse plot; unsupported expressions remain explicit translation errors.
-std::vector<Series> ellipse_series(const std::string& command,
-                                   const std::array<double, 3>& xdef,
-                                   const std::array<double, 3>& ydef,
-                                   const std::pair<double, double>& trange,
-                                   const std::vector<std::string>& colors) {
+std::vector<Series> ellipse_series(
+    const std::string& command,
+    const std::map<std::string, std::array<double, 3>>& functions,
+    const std::pair<double, double>& trange,
+    const std::vector<std::string>& colors) {
     const auto specs = split_specs(command);
     if (specs.size() % 2 != 0 || specs.empty())
         throw std::runtime_error("parametric plot requires x(t), y(t) pairs");
     std::vector<Series> series;
+    static const std::regex xname(R"(^x[0-9]*\(t\)$)");
+    static const std::regex yname(R"(^y[0-9]*\(t\)$)");
     for (size_t i = 0; i < specs.size(); i += 2) {
         const auto& xspec = specs[i];
         const auto& yspec = specs[i + 1];
@@ -244,19 +260,34 @@ std::vector<Series> ellipse_series(const std::string& command,
         ys >> ysource;
         const auto xconst = number(xsource);
         const auto yconst = number(ysource);
-        if (xsource != "x(t)" && !xconst)
+        if (!std::regex_match(xsource, xname) && !xconst)
             throw std::runtime_error("unsupported parametric x source: " + xspec);
-        if (ysource != "y(t)" && !yconst)
+        if (!std::regex_match(ysource, yname) && !yconst)
             throw std::runtime_error("unsupported parametric y source: " + yspec);
         // libgretl uses 'notitle' and optional 'w lines lt N'. Avoid
         // silently accepting other plot types as line graphs.
         static const std::regex parameters(
-            R"(^\S+\s+notitle(?:\s+(?:w|with)\s+lines\s+lt\s+([1-9][0-9]*))?\s*$)");
+            R"(^\S+(?:\s+notitle)?(?:\s+(?:w|with)\s+(?:l|lines)(?:\s+lt\s+([1-9][0-9]*))?)?\s*$)");
         std::smatch match;
-        if (trim(xspec) != "x(t)" && !xconst)
+        if (trim(xspec) != xsource)
             throw std::runtime_error("invalid parametric x expression");
         if (!std::regex_match(yspec, match, parameters))
             throw std::runtime_error("unsupported parametric series style: " + yspec);
+        // Resolve each numbered definition independently, so different curves
+        // in one plot can have distinct centers and covariance matrices.
+        const auto resolve = [&](const std::string& source, char axis)
+            -> const std::array<double, 3>* {
+            if (number(source))
+                return nullptr;
+            const auto name = source.substr(0, source.find('('));
+            const auto found = functions.find(name);
+            if (found == functions.end())
+                throw std::runtime_error("undefined parametric " + std::string(1, axis) +
+                                         " function: " + source);
+            return &found->second;
+        };
+        const auto* xdef = resolve(xsource, 'x');
+        const auto* ydef = resolve(ysource, 'y');
         Series ser;
         ser.title = "";
         ser.style = Style::Lines;
@@ -272,10 +303,10 @@ std::vector<Series> ellipse_series(const std::string& command,
         // the source supplies an explicit trange.
         for (int k = 0; k <= 400; ++k) {
             const double t = trange.first + (trange.second - trange.first) * k / 400;
-            const double x =
-                xconst ? *xconst : (xdef[0] * std::cos(t) + xdef[1] * std::sin(t) + xdef[2]);
-            const double y =
-                yconst ? *yconst : (ydef[0] * std::cos(t) + ydef[1] * std::sin(t) + ydef[2]);
+            const double x = xconst ? *xconst :
+                ((*xdef)[0] * std::cos(t) + (*xdef)[1] * std::sin(t) + (*xdef)[2]);
+            const double y = yconst ? *yconst :
+                ((*ydef)[0] * std::cos(t) + (*ydef)[1] * std::sin(t) + (*ydef)[2]);
             ser.points.push_back({x, y});
         }
         series.push_back(std::move(ser));
@@ -930,7 +961,8 @@ ParseResult parse(const std::string& source) {
     Style default_style = Style::Points;
     bool multiplot_layout = false;
     bool parametric = false;
-    std::optional<std::array<double, 3>> x_function, y_function;
+    // Keep numbered parametric definitions across successive plot commands.
+    std::map<std::string, std::array<double, 3>> parametric_functions;
     std::pair<double, double> trange{-5.0, 5.0};
     std::string previous_file;
     std::map<std::string, std::vector<std::string>> external_data;
@@ -1207,9 +1239,12 @@ ParseResult parse(const std::string& source) {
                 trange = {*range.min, *range.max};
                 continue;
             }
-            if (starts(s, "x(t) =") || starts(s, "y(t) =")) {
-                auto& definition = starts(s, "x(t) =") ? x_function : y_function;
-                definition = ellipse_function(s, s[0]);
+            // Restrict assignments to the xN(t)/yN(t) ellipse family.
+            static const std::regex parametric_definition(R"(^([xy][0-9]*)\(t\)\s*=)");
+            std::smatch function_match;
+            if (std::regex_search(s, function_match, parametric_definition)) {
+                const auto name = function_match[1].str();
+                parametric_functions[name] = ellipse_function(s, name);
                 continue;
             }
             // A polar plot's inline columns contain theta (radians) and r.
@@ -2069,10 +2104,8 @@ ParseResult parse(const std::string& source) {
                     command += " " + trim(lines[++i]);
                 }
                 if (parametric) {
-                    if (!x_function || !y_function)
-                        throw std::runtime_error("parametric plot lacks x(t) or y(t) definition");
                     auto lines = ellipse_series(
-                        command, *x_function, *y_function, trange, d.linetype_colors);
+                        command, parametric_functions, trange, d.linetype_colors);
                     p->series.insert(p->series.end(), lines.begin(), lines.end());
                     p->legend = false;
                     continue;
