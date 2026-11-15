@@ -1664,11 +1664,11 @@ ParseResult parse(const std::string& source) {
                 // Decimal commas in data coordinates must not be mistaken for
                 // the separator between x and y (as used by boxplots).
                 static const std::regex graph_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+(.+?)\s*,\s*graph\s+(.+?)(?:\s+(center))?(?:\s+(?:front|back))*(?:\s+tc\s+rgb\s+["']([^"']+)["'])?\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+graph\s+(.+?)\s*,\s*(?:graph\s+)?(.+?)(?:\s+(left|center|right))?(?:\s+(?:front|back))*(?:\s+tc\s+rgb\s+["']([^"']+)["'])?\s*$)GP");
                 static const std::regex point_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^\s]+)\s+point\s+lt\s+([0-9]+)\s+pt\s+([0-9]+)\s+offset\s+([^,\s]+)\s*,\s*([^\s]+)\s*$)GP");
                 static const std::regex data_label_re(
-                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)(?:\s+center)?(?:\s+(?:front|back))*(?:\s+rotate\s+by\s+-?[0-9.]+)?\s*$)GP");
+                    R"GP(^set label\s+(["'])(.*?)\1\s+at\s+(.+?)(?:\s+(left|center|right))?(?:\s+(?:front|back))*(?:\s+rotate\s+by\s+-?[0-9.]+)?\s*$)GP");
                 // Correspondence-analysis plots attach font size and text color
                 // directly to data labels.  The package may omit whitespace
                 // between the closing font quote and `center`.
@@ -1697,6 +1697,7 @@ ParseResult parse(const std::string& source) {
                     // Layer keywords are accepted; Matplotlib draws graph
                     // annotations above the data by default.
                     Plot::Label label{match[2].str(), x, y, true, match[5].str() == "center"};
+                    label.right_aligned = match[5].str() == "right";
                     label.text_color = match[6].str();
                     p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, point_label_re)) {
@@ -1731,11 +1732,12 @@ ParseResult parse(const std::string& source) {
                         throw std::runtime_error("unsupported label: " + s);
                     const double x = scalar_value(coords[1].str(), plot_scalars);
                     const double y = scalar_value(coords[2].str(), plot_scalars);
-                    p->labels.push_back({match[2].str(),
-                                         x,
-                                         y,
-                                         false,
-                                         coordinates.find(" center") != std::string::npos});
+                    // Alignment is parsed separately from data coordinates, so
+                    // `left` and `right` are never passed to scalar_value().
+                    Plot::Label label{match[2].str(), x, y, false,
+                                      match[4].str() == "center"};
+                    label.right_aligned = match[4].str() == "right";
+                    p->labels.push_back(std::move(label));
                 } else {
                     throw std::runtime_error("unsupported label: " + s);
                 }

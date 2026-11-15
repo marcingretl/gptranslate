@@ -289,3 +289,7 @@ test('season-linetype-loop', py, args: [meson.current_source_dir() / 'tests' / '
 # coefcomp uses xerrorbars from a named block for horizontal confidence
 # intervals. Check symmetric/asymmetric bounds and preserve yerrorbars.
 test('coefcomp-xerrorbars', py, args: [meson.current_source_dir() / 'tests' / 'check_coefcomp_xerrorbars.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'coefcomp-xerrorbars.gp', meson.current_build_dir() / 'coefcomp-xerrorbars.py'])
+
+# The contributed roc package uses left-aligned text in data/graph axes.
+# The tests already exist in this audit snapshot; register them only once.
+test('roc-label-alignment', py, args: [meson.current_source_dir() / 'tests' / 'check_roc_label_alignment.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'roc-label-alignment.gp', meson.current_build_dir() / 'roc-label-alignment.py'])

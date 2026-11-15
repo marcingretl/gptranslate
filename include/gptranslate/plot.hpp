@@ -174,6 +174,8 @@ struct Plot {
         bool graph_coordinates{false};
         // Gnuplot defaults to left alignment unless `center` is requested.
         bool centered{false};
+        // Explicit `right` aligns the text endpoint with its coordinate.
+        bool right_aligned{false};
         // Labels may include a point marker at a data coordinate and a
         // gnuplot character-cell offset from that marker.
         bool point_marker{false};
