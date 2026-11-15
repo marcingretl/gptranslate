@@ -1343,8 +1343,10 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 continue;
             }
             o << "ax.text(" << std::setprecision(17) << label.x << ", " << label.y << ", "
-              << pystr(label.text) << ", ha='" << (label.centered ? "center" :
-                                                    label.right_aligned ? "right" : "left")
+              << pystr(label.text) << ", ha='"
+              << (label.centered        ? "center"
+                  : label.right_aligned ? "right"
+                                        : "left")
               << "', va='center'";
             if (label.graph_coordinates)
                 o << ", transform=ax.transAxes";

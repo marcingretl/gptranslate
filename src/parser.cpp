@@ -1734,8 +1734,7 @@ ParseResult parse(const std::string& source) {
                     const double y = scalar_value(coords[2].str(), plot_scalars);
                     // Alignment is parsed separately from data coordinates, so
                     // `left` and `right` are never passed to scalar_value().
-                    Plot::Label label{match[2].str(), x, y, false,
-                                      match[4].str() == "center"};
+                    Plot::Label label{match[2].str(), x, y, false, match[4].str() == "center"};
                     label.right_aligned = match[4].str() == "right";
                     p->labels.push_back(std::move(label));
                 } else {
@@ -3011,8 +3010,8 @@ ParseResult parse(const std::string& source) {
                     const bool palette_box =
                         ser.style == Style::Boxes && spec.find(" palette") != std::string::npos;
                     const bool filled = ser.style == Style::FilledCurve;
-                    const bool errorbars = ser.style == Style::ErrorBars ||
-                                           ser.style == Style::XErrorBars;
+                    const bool errorbars =
+                        ser.style == Style::ErrorBars || ser.style == Style::XErrorBars;
                     const auto using_pos = using_offset(spec);
                     const bool has_using = using_pos.has_value();
                     // Vertical and horizontal error bars accept a symmetric
@@ -3165,8 +3164,8 @@ ParseResult parse(const std::string& source) {
                                 // Bounds apply to x for xerrorbars and to y for
                                 // yerrorbars. Preserve the actual estimate even
                                 // when it lies outside an asymmetric interval.
-                                const double center = ser.style == Style::XErrorBars
-                                                          ? *values[0] : *values[1];
+                                const double center =
+                                    ser.style == Style::XErrorBars ? *values[0] : *values[1];
                                 const double lo =
                                     values.size() == 3 ? center - std::abs(*values[2]) : *values[2];
                                 const double hi =

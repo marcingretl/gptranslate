@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Contributed-package plotting compatibility
+
+- Added palette-based color mapping for `color_xy`, including `set palette negative`,
+  mapped 2D `splot` data and `linespoints` colored via `lt palette`.
+- Added gnuplot pie-chart constructs, including scalar arithmetic assignments,
+  semicolon-separated statements, circle sectors (`set object ... circle arc`)
+  and associated labels.
+- Added candlestick/OHLC rendering, optionally with volume in a multiplot layout.
+  Extended axis formatting for `set format x ("%.0f")` and gnuplot SI formats
+  such as `\%.0s \%c`, including multiple escaped percent signs.
+- Added Sankey-style graphical objects, including translucent rectangles,
+  filled curves and polynomial/function segments.
+- Added horizontal `xerrorbars`, using both symmetric offsets and asymmetric
+  limits. Kept the estimate position independent of its error interval, and
+  preserved the existing `errorbars`/`yerrorbars` behavior. Added support for
+  the named color syntax `lc black` used by `coefcomp`.
+- Extended explicit tic-list parsing to handle lists after modifiers such as
+  `nomirror`, preserving quoted labels containing spaces, commas or parentheses
+  (used by `coefcomp`).
+- Extended label parsing and Matplotlib rendering to recognize `left`, `center`
+  and `right` alignment and `front`, including mixed `graph` coordinates without
+  repeating the `graph` keyword for the second coordinate (used by `roc`).
+- Added bounded `set for [i=...:...] linetype i ps ...` statements, explicit
+  `set linetype N ps ...`, and point-size overrides attached to plotted series
+  (used by `season_plot`).
+- Restored acceptance of decimal-comma scalar literals through `number()`;
+  this fixes a regression in libgretl-generated boxplots.
+- Extended contributed-package compatibility for `kddensity` gridded inline
+  XYZ contour and `pm3d` map output, including `unset ztics`, bare
+  `set contour`, `set dgrid3d X,Y` and `set view map scale S`.
+- Preserved positive `set size ratio R` as a Matplotlib axes-box ratio for
+  correspondence-analysis biplots, independently of `set size ratio -1`.
+
+### Other changes since 0.12.0
+
 - Fixed correspondence-analysis label parsing for `font",10"center`
   and `center tc rgb` modifiers, including labels without whitespace
   between font and alignment. Matplotlib now preserves per-label font size,
@@ -34,6 +69,18 @@
 - Initially added `--no-show` to omit the final `plt.show()` from generated Matplotlib scripts; at that stage the default still included `plt.show()`. The new `--add-show` opt-in above supersedes that behavior.
 - This option lets an embedding application such as gretl4py control figure display itself. Display behavior in non-interactive scripts and on Windows/TkAgg is still under investigation; no change to plot-queue handling is claimed.
 
+### Regression and integration verification
+
+- Added headless translation/rendering regressions for the new constructs,
+  including named axis tics, horizontal error bars, label placement, inline
+  XYZ contours and heatmaps, and linetype point-size loops.
+- On 2026-11-15, the full Meson test suite completed with **83 passed,
+  0 failed**. The external `gretl4py` contributed-package audit completed
+  **17/17** reviewed custom cases across **15** packages, producing **19**
+  Matplotlib figures. These integration results confirm successful execution
+  and figure creation, not pixel-identical rendering against gnuplot.
+
+
 ## [0.12.0] - 2026-10-29
 
 First public, experimental release.
@@ -47,9 +94,3 @@ First public, experimental release.
 - Automatic contrasting colors for multi-series plots, with opt-out.
 
 Earlier development milestones (0.4–0.11.11) were internal iterations before this public release. See Git history for details when available.
-
-- Extend contributed-package compatibility for kddensity's gridded inline
-  XYZ contour and pm3d map output, including `unset ztics`, bare
-  `set contour`, `set dgrid3d X,Y`, and `set view map scale S`.
-- Preserve positive `set size ratio R` as a Matplotlib axes-box ratio
-  for correspondence-analysis biplots, independently of `ratio -1`.
