@@ -300,3 +300,14 @@ test('naivefc-style-line', py,
   args: [meson.current_source_dir() / 'tests' / 'check_naivefc_style_line.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'naivefc-style-line.gp',
          meson.current_build_dir() / 'naivefc-style-line.py'])
+
+# random_forest emits assigned scalar offsets and named-data `with boxxy` bars
+# with ytic labels; also verify the full six-coordinate BoxXY form.
+test('random-forest-boxxy', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_random_forest_boxxy.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'random-forest-boxxy.gp',
+         meson.current_build_dir() / 'random-forest-boxxy.py', 'random-forest'])
+test('boxxy-bounds', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_random_forest_boxxy.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'boxxy-bounds.gp',
+         meson.current_build_dir() / 'boxxy-bounds.py', 'bounds'])

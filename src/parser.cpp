@@ -709,8 +709,10 @@ int using_col(const std::string& spec, int default_col, bool first) {
 // arbitrary code.
 class ColumnExpression {
   public:
-    ColumnExpression(const std::string& expression, const std::vector<std::string>& cells)
-        : expression_(expression), cells_(cells) {
+    ColumnExpression(const std::string& expression,
+                     const std::vector<std::string>& cells,
+                     const std::map<std::string, double>* variables = nullptr)
+        : expression_(expression), cells_(cells), variables_(variables) {
     }
     std::optional<double> evaluate() {
         auto value = sum();
@@ -784,6 +786,23 @@ class ColumnExpression {
             size_t col = std::stoul(expression_.substr(start, pos_ - start));
             return col > 0 && col <= cells_.size() ? number(cells_[col - 1]) : std::nullopt;
         }
+        // Restricted named scalars are allowed inside using expressions.
+        // This handles numeric assignments such as bw = 0.6 in rf_plot.
+        if (std::isalpha(static_cast<unsigned char>(expression_[pos_])) ||
+            expression_[pos_] == '_') {
+            const size_t begin = pos_++;
+            while (pos_ < expression_.size() &&
+                   (std::isalnum(static_cast<unsigned char>(expression_[pos_])) ||
+                    expression_[pos_] == '_'))
+                ++pos_;
+            const auto name = expression_.substr(begin, pos_ - begin);
+            if (variables_) {
+                const auto it = variables_->find(name);
+                if (it != variables_->end())
+                    return it->second;
+            }
+            throw std::runtime_error("undefined using scalar: " + name);
+        }
         size_t start = pos_;
         while (pos_ < expression_.size() &&
                (std::isdigit(static_cast<unsigned char>(expression_[pos_])) ||
@@ -795,6 +814,7 @@ class ColumnExpression {
     }
     const std::string& expression_;
     const std::vector<std::string>& cells_;
+    const std::map<std::string, double>* variables_{nullptr};
     size_t pos_{0};
 };
 // Split using fields without breaking expressions inside parentheses.
@@ -922,9 +942,11 @@ std::optional<double> palette_condition(const std::string& expression,
                              cells);
 }
 // Evaluate a using field as a column reference or a restricted expression.
-std::optional<double> evaluate_using_field(const std::string& field,
-                                           const std::vector<std::string>& cells,
-                                           size_t row_index = 0) {
+std::optional<double>
+evaluate_using_field(const std::string& field,
+                     const std::vector<std::string>& cells,
+                     size_t row_index = 0,
+                     const std::map<std::string, double>* variables = nullptr) {
     const std::string expr = trim(field);
     // Pseudo-column 0 is the zero-based gnuplot record index.
     if (expr == "0")
@@ -938,7 +960,7 @@ std::optional<double> evaluate_using_field(const std::string& field,
     }
 
     // The existing expression evaluator handles $N, arithmetic and parentheses.
-    return ColumnExpression(expr, cells).evaluate();
+    return ColumnExpression(expr, cells, variables).evaluate();
 }
 } // namespace
 // Evaluate scalar expressions used by assignments and conditional branches.
@@ -1478,12 +1500,15 @@ ParseResult parse(const std::string& source) {
                 for (size_t k = 0; k < offsets.size(); ++k) {
                     if (starts(parts[k], "graph ") != graph_units)
                         throw std::runtime_error("mixed offsets units are not supported: " + s);
-                    const auto value = number(graph_units ? parts[k].substr(6) : parts[k]);
-                    if (!value || !std::isfinite(*value))
+                    // Gnuplot offsets accept constant arithmetic involving
+                    // previously assigned scalars, but never row expressions.
+                    const std::string expr = graph_units ? parts[k].substr(6) : parts[k];
+                    const double value = scalar_value(expr, plot_scalars);
+                    if (!std::isfinite(value))
                         throw std::runtime_error("invalid offsets: " + parts[k]);
-                    if (graph_units && (*value < 0 || *value >= 1))
+                    if (graph_units && (value < 0 || value >= 1))
                         throw std::runtime_error("invalid graph offsets: " + parts[k]);
-                    offsets[k] = *value;
+                    offsets[k] = value;
                 }
                 if (graph_units && (offsets[0] + offsets[1] >= 1 || offsets[2] + offsets[3] >= 1))
                     throw std::runtime_error("graph offsets exceed available plot area");
@@ -2878,6 +2903,10 @@ ParseResult parse(const std::string& source) {
                         ser.style = Style::Candlesticks;
                     } else if (style == "boxes") {
                         ser.style = Style::Boxes;
+                    } else if (style == "boxxy" || style == "boxxyerror" ||
+                               style == "boxxyerrorbars") {
+                        // Gnuplot abbreviates boxxyerror as boxxy.
+                        ser.style = Style::BoxXY;
                     } else if (style == "dots") {
                         ser.style = Style::Dots;
                     } else if (style == "filledcurve" || style == "filledcurves") {
@@ -3013,6 +3042,7 @@ ParseResult parse(const std::string& source) {
                     const bool palette_box =
                         ser.style == Style::Boxes && spec.find(" palette") != std::string::npos;
                     const bool filled = ser.style == Style::FilledCurve;
+                    const bool boxxy = ser.style == Style::BoxXY;
                     const bool errorbars =
                         ser.style == Style::ErrorBars || ser.style == Style::XErrorBars;
                     const auto using_pos = using_offset(spec);
@@ -3029,10 +3059,39 @@ ParseResult parse(const std::string& source) {
                             error_fields = using_fields(spec, 3);
                         }
                     }
+                    // BoxXY accepts 4 center/delta fields or 6 absolute bounds;
+                    // an optional ytic(N) field supplies category names.
+                    std::vector<std::string> boxxy_fields;
+                    int boxxy_ytic_col = 0;
+                    if (boxxy) {
+                        if (!has_using)
+                            throw std::runtime_error("boxxy requires a using specification");
+                        bool parsed = false;
+                        for (const size_t count : {5U, 7U, 4U, 6U}) {
+                            try {
+                                boxxy_fields = using_fields(spec, count);
+                                parsed = true;
+                                break;
+                            } catch (const std::runtime_error&) {
+                                // Try the next supported column count.
+                            }
+                        }
+                        if (!parsed)
+                            throw std::runtime_error("boxxy requires 4 or 6 numeric fields");
+                        if (boxxy_fields.size() == 5 || boxxy_fields.size() == 7) {
+                            static const std::regex label_re(
+                                R"(^ytic(?:labels)?\(\s*([1-9][0-9]*)\s*\)$)");
+                            std::smatch label_match;
+                            if (!std::regex_match(boxxy_fields.back(), label_match, label_re))
+                                throw std::runtime_error("unsupported boxxy tic field");
+                            boxxy_ytic_col = std::stoi(label_match[1].str());
+                            boxxy_fields.pop_back();
+                        }
+                    }
                     // Arithmetic using expressions need per-row evaluation.
                     // Search only after 'using' (or 'u'): named sources such
                     // as $data are not column expressions.
-                    const bool using_expr = !filled && !errorbars && has_using &&
+                    const bool using_expr = !filled && !errorbars && !boxxy && has_using &&
                                             spec.find('$', *using_pos) != spec.npos;
                     const auto fields =
                         candle
@@ -3041,9 +3100,10 @@ ParseResult parse(const std::string& source) {
                         : palette_box ? using_fields(spec, 3)
                         : using_expr  ? using_fields(spec, 2)
                                       : std::vector<std::string>{};
-                    auto xcol = (filled || using_expr || candle || palette_box || errorbars)
-                                  ? 1
-                                  : using_col(spec, 1, true);
+                    auto xcol =
+                        (filled || using_expr || candle || palette_box || errorbars || boxxy)
+                            ? 1
+                            : using_col(spec, 1, true);
                     // Histograms use the row number as x; `using 2` selects only the
                     // height. `using 2:xtic(1)` also provides category labels.
                     int category_col = 0;
@@ -3061,7 +3121,7 @@ ParseResult parse(const std::string& source) {
                                 throw std::runtime_error("unsupported histogram xtic: " + spec);
                         }
                     }
-                    auto ycol = (filled || using_expr || candle || palette_box)
+                    auto ycol = (filled || using_expr || candle || palette_box || boxxy)
                                   ? 2
                                   : using_col(spec, 2, false);
                     const bool record_categories =
@@ -3109,7 +3169,42 @@ ParseResult parse(const std::string& source) {
                                                                            : std::nullopt);
                         auto y =
                             (size_t)ycol <= cells.size() ? number(cells[ycol - 1]) : std::nullopt;
-                        if (candle) {
+                        if (boxxy) {
+                            std::vector<std::optional<double>> values;
+                            for (const auto& field : boxxy_fields)
+                                values.push_back(
+                                    evaluate_using_field(field, cells, row, &plot_scalars));
+                            if (std::all_of(values.begin(), values.end(), [](const auto& v) {
+                                    return v.has_value() && std::isfinite(*v);
+                                })) {
+                                double xmid = *values[0], ymid = *values[1];
+                                double dx, dy;
+                                if (values.size() == 4) {
+                                    dx = std::abs(*values[2]);
+                                    dy = std::abs(*values[3]);
+                                } else {
+                                    // Six fields supply xmin/xmax and ymin/ymax.
+                                    const double xmin = std::min(*values[2], *values[3]);
+                                    const double xmax = std::max(*values[2], *values[3]);
+                                    const double ymin = std::min(*values[4], *values[5]);
+                                    const double ymax = std::max(*values[4], *values[5]);
+                                    xmid = (xmin + xmax) / 2;
+                                    ymid = (ymin + ymax) / 2;
+                                    dx = (xmax - xmin) / 2;
+                                    dy = (ymax - ymin) / 2;
+                                }
+                                ser.points.push_back({xmid, ymid});
+                                ser.box_half_width.push_back(dx);
+                                ser.box_half_height.push_back(dy);
+                                if (boxxy_ytic_col > 0) {
+                                    const size_t col = static_cast<size_t>(boxxy_ytic_col - 1);
+                                    if (col >= cells.size())
+                                        throw std::runtime_error("boxxy ytic column is missing");
+                                    p->y.tics.enabled = true;
+                                    p->y.tics.explicit_tics.push_back({unquote(cells[col]), ymid});
+                                }
+                            }
+                        } else if (candle) {
                             // Gnuplot candlesticks use x:open:low:high:close columns.
                             std::vector<std::optional<double>> values;
                             for (size_t k = 0; k < std::min<size_t>(5, fields.size()); ++k)

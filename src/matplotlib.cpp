@@ -1127,6 +1127,31 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                     }
                     break;
                 }
+                case Style::BoxXY: {
+                    // Gnuplot boxxy uses independent horizontal/vertical half-sizes.
+                    // Rectangles keep the source centers and the current fill density.
+                    o << "from matplotlib.patches import Rectangle\n";
+                    o << "_gp_box_dx = [";
+                    for (size_t k = 0; k < s.box_half_width.size(); ++k) {
+                        if (k)
+                            o << ", ";
+                        o << std::setprecision(17) << s.box_half_width[k];
+                    }
+                    o << "]\n_gp_box_dy = [";
+                    for (size_t k = 0; k < s.box_half_height.size(); ++k) {
+                        if (k)
+                            o << ", ";
+                        o << std::setprecision(17) << s.box_half_height[k];
+                    }
+                    o << "]\n";
+                    o << "for _bx, _by, _dx, _dy in zip(x, y, _gp_box_dx, _gp_box_dy):\n";
+                    o << "    target.add_patch(Rectangle((_bx - _dx, _by - _dy), "
+                         "2 * _dx, 2 * _dy, facecolor=kw.get('color', 'C0'), "
+                         "edgecolor=kw.get('color', 'C0'), linewidth=kw['linewidth'], "
+                         "alpha="
+                      << p.fill_alpha << ", label=kw['label'], zorder=1))\n";
+                    break;
+                }
                 case Style::Boxes: {
                     // Matplotlib bar widths are always in x-axis units. Gnuplot's default
                     // derives its width from point spacing, not from a fixed value of 0.8.
@@ -1239,10 +1264,20 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             const auto& offsets = *p.axis_offsets;
             o << "_gp_x0, _gp_x1 = ax.dataLim.intervalx\n";
             o << "_gp_y0, _gp_y1 = ax.dataLim.intervaly\n";
-            if (!p.x.min && !p.x.max && !p.x.log)
-                o << "ax.set_xlim(_gp_x0 - " << offsets[0] << ", _gp_x1 + " << offsets[1] << ")\n";
-            if (!p.y.min && !p.y.max && !p.y.log)
-                o << "ax.set_ylim(_gp_y0 - " << offsets[3] << ", _gp_y1 + " << offsets[2] << ")\n";
+            // Apply offsets to the automatic side even when the opposite
+            // limit was fixed explicitly (e.g. `set yrange [0:*]`).
+            if (!p.x.log) {
+                if (!p.x.min)
+                    o << "ax.set_xlim(left=_gp_x0 - " << offsets[0] << ")\n";
+                if (!p.x.max)
+                    o << "ax.set_xlim(right=_gp_x1 + " << offsets[1] << ")\n";
+            }
+            if (!p.y.log) {
+                if (!p.y.min)
+                    o << "ax.set_ylim(bottom=_gp_y0 - " << offsets[3] << ")\n";
+                if (!p.y.max)
+                    o << "ax.set_ylim(top=_gp_y1 + " << offsets[2] << ")\n";
+            }
         }
         if (p.graph_offsets) {
             // Convert graph-relative fractions to data-coordinate extensions.

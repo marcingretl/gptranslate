@@ -39,7 +39,8 @@ enum class Style {
     FilledCurve,
     ErrorBars,
     XErrorBars,
-    Candlesticks
+    Candlesticks,
+    BoxXY
 };
 struct Series {
     std::string title, color;
@@ -71,6 +72,8 @@ struct Series {
     std::vector<double> upper;
     // Candlestick columns: x, box bottom, whisker bottom, whisker top, box top.
     std::vector<double> candle_low, candle_high, candle_top;
+    // BoxXY stores rectangle half-widths and half-heights per data row.
+    std::vector<double> box_half_width, box_half_height;
     // A sixth using field may supply a per-candle/box palette coordinate.
     std::vector<double> palette_values;
 };
