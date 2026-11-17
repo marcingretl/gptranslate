@@ -311,3 +311,10 @@ test('boxxy-bounds', py,
   args: [meson.current_source_dir() / 'tests' / 'check_random_forest_boxxy.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'boxxy-bounds.gp',
          meson.current_build_dir() / 'boxxy-bounds.py', 'bounds'])
+
+# fsboost sets named line styles with pointsize only for coefficient paths.
+# Check the marker sizes, and retain prior RGB/line-width behavior.
+test('fsboost-style-pointsize', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_fsboost_style_pointsize.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'fsboost-style-pointsize.gp',
+         meson.current_build_dir() / 'fsboost-style-pointsize.py'])

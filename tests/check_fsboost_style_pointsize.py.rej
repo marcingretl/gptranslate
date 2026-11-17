@@ -1,0 +1,38 @@
+--- tests/check_fsboost_style_pointsize.py
++++ tests/check_fsboost_style_pointsize.py
+@@ -0,0 +1,35 @@
++#!/usr/bin/env python3
++"""Check named pointsize-only styles from the fsboost coefficient plot."""
++from pathlib import Path
++import subprocess
++import sys
++
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from matplotlib.colors import to_hex
++
++exe, source, output = sys.argv[1:4]
++subprocess.run([exe, '--no-show', '--output', output, source], check=True)
++code = Path(output).read_text(encoding='utf-8')
++namespace = {'__name__': '__main__'}
++exec(compile(code, output, 'exec'), namespace)
++fig = namespace['fig']
++fig.canvas.draw()
++lines = fig.axes[0].lines
++assert len(lines) == 4, len(lines)
++
++# The named style changes only the marker size, not its line width/color.
++assert abs(lines[0].get_markersize() - 6 * 0.02) < 1e-10
++assert abs(lines[1].get_markersize() - 6 * 0.15) < 1e-10
++assert lines[0].get_linewidth() == 1.5
++assert lines[1].get_linewidth() == 1.5
++assert lines[0].get_color() != lines[1].get_color()
++
++# Combined styles retain RGB and linewidth; plot-level ps has precedence.
++assert abs(lines[2].get_markersize() - 6 * 0.25) < 1e-10
++assert to_hex(lines[2].get_color()) == '#aa0055'
++assert lines[2].get_linewidth() == 2
++assert abs(lines[3].get_markersize() - 6 * 2 * 0.3) < 1e-10
++plt.close(fig)
++print('fsboost named line point sizes: OK')
