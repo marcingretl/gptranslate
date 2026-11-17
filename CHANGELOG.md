@@ -34,6 +34,19 @@
   `set contour`, `set dgrid3d X,Y` and `set view map scale S`.
 - Preserved positive `set size ratio R` as a Matplotlib axes-box ratio for
   correspondence-analysis biplots, independently of `set size ratio -1`.
+- Extended named `set style line N` parsing for the `naiveFC` package:
+  `lc rgb "..." lt N` definitions no longer require an explicit `lw`.
+  The Matplotlib backend retains the default line width when none is supplied.
+- Added support for `with boxxy`/`boxxyerror` rectangles used in
+  `random_forest`, including center/half-size and explicit-bounds forms,
+  per-row dimensions, and category labels from `ytic(N)`. Constant arithmetic
+  with previously assigned gnuplot scalars is now accepted in `set offsets`
+  and relevant `using` expressions. The backend applies offsets to automatic
+  axis limits even when the opposite limit is fixed explicitly.
+- Extended named line styles to accept `ps` / `pointsize`, including
+  point-size-only definitions such as `set style line 1 ps 0.02` used by
+  `fsboost`. Specified point sizes are propagated to Matplotlib markers
+  without overwriting unspecified line colors, types, or widths.
 
 ### Other changes since 0.12.0
 
@@ -75,10 +88,21 @@
   including named axis tics, horizontal error bars, label placement, inline
   XYZ contours and heatmaps, and linetype point-size loops.
 - On 2026-11-15, the full Meson test suite completed with **83 passed,
-  0 failed**. The external `gretl4py` contributed-package audit completed
-  **17/17** reviewed custom cases across **15** packages, producing **19**
-  Matplotlib figures. These integration results confirm successful execution
-  and figure creation, not pixel-identical rendering against gnuplot.
+  0 failed**. The `priority5` audit completed **17/17** reviewed custom cases
+  across **15** contributed packages, producing **19** Matplotlib figures.
+- Added headless regression tests `naivefc-style-line`,
+  `random-forest-boxxy`, `boxxy-bounds`, and `fsboost-style-pointsize`,
+  covering the additional named-line styles, BoxXY geometry, category labels,
+  and expression-based offsets.
+- On 2026-11-17, the external `gretl4py` custom integration audits completed
+  `priority5` **17/17**, `priority6` **7/7**, and `priority7` **8/8**:
+  **32/32** reviewed cases across **25** packages, generating **34**
+  Matplotlib figures with no failures. The latest full candidate-package
+  audit separately reported **56 PASS, 0 FAIL** and **177** figures, with
+  skipped and no-figure cases reported separately. The complete Meson test
+  suite also passed after the `priority7` changes; its updated test count
+  was not recorded here. Successful execution does not guarantee
+  pixel-identical rendering against gnuplot.
 
 
 ## [0.12.0] - 2026-10-29
