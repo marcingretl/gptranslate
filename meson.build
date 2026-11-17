@@ -293,3 +293,10 @@ test('coefcomp-xerrorbars', py, args: [meson.current_source_dir() / 'tests' / 'c
 # The contributed roc package uses left-aligned text in data/graph axes.
 # The tests already exist in this audit snapshot; register them only once.
 test('roc-label-alignment', py, args: [meson.current_source_dir() / 'tests' / 'check_roc_label_alignment.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'roc-label-alignment.gp', meson.current_build_dir() / 'roc-label-alignment.py'])
+
+# naiveFC defines RGB named line styles with an optional line width.
+# Verify default and explicitly selected Matplotlib line widths.
+test('naivefc-style-line', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_naivefc_style_line.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'naivefc-style-line.gp',
+         meson.current_build_dir() / 'naivefc-style-line.py'])
