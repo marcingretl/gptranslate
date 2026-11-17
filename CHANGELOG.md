@@ -43,6 +43,9 @@
   with previously assigned gnuplot scalars is now accepted in `set offsets`
   and relevant `using` expressions. The backend applies offsets to automatic
   axis limits even when the opposite limit is fixed explicitly.
+- Fixed parsing of gnuplot tic modifiers with a spaced font specification
+  such as `font ", 8"` (found in `PanelTools`). A headless regression
+  checks the resulting tick-label font size.
 - Extended named line styles to accept `ps` / `pointsize`, including
   point-size-only definitions such as `set style line 1 ps 0.02` used by
   `fsboost`. Specified point sizes are propagated to Matplotlib markers
@@ -103,6 +106,14 @@
   suite also passed after the `priority7` changes; its updated test count
   was not recorded here. Successful execution does not guarantee
   pixel-identical rendering against gnuplot.
+- On 2026-11-17, the `priority8` custom audit completed **8/8** cases for
+  **5** additional packages (`VARrec`, `johansenrec`, `BEKK`, `MSVAR`,
+  `PanelTools`) and generated **11** Matplotlib figures. Combined
+  `priority5`–`priority8` integration results: **40/40 PASS**, **45**
+  figures across **30** packages. `MSVAR` needed a suite-specific dataset
+  preload before package inclusion; `PanelTools` needed the tic-font
+  parsing correction above. Plot creation does not establish pixel-identical
+  output against gnuplot.
 
 
 ## [0.12.0] - 2026-10-29
