@@ -116,6 +116,12 @@ test('bace-prior-histogram', py, args: [meson.current_source_dir() / 'tests' / '
 test('bace-pip-runtime', py, args: [meson.current_source_dir() / 'tests' / 'check_palette_runtime.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'bace-pip.gp', meson.current_build_dir() / 'bace-pip-runtime.py'])
 
 # Regression lines must retain their slope and requested legend placement.
+# PanelTools emits a valid tic-label font size with whitespace after the comma.
+# Translate and execute this syntax in Agg; check both primary axis label sizes.
+test('paneltools-tic-font-spacing', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_paneltools_tic_font.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'paneltools-tic-font-spacing.gp',
+         meson.current_build_dir() / 'paneltools-tic-font-spacing.py'])
 test('regression-ols', py, args: [meson.current_source_dir() / 'tests' / 'check_regression_ols.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'regression-ols.gp', meson.current_build_dir() / 'regression-ols.py'])
 
 # Analytic fits cover polynomial, inverse and logarithmic expressions.

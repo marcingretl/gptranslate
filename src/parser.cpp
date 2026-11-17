@@ -599,7 +599,7 @@ void parse_tics(Tics& tics, const std::string& spec) {
     }
     // A font modifier such as font ',7' specifies tick-label size.
     static const std::regex font_re(
-        R"GP((?:^|\s)font\s+(['"])([^'",]*),([0-9]+(?:\.[0-9]+)?)\1(?=\s|$))GP");
+        R"GP((?:^|\s)font\s+(['"])([^'",]*),\s*([0-9]+(?:\.[0-9]+)?)\1(?=\s|$))GP");
     if (std::regex_search(spec, match, font_re)) {
         tics.font_size = std::stod(match[3].str());
         if (*tics.font_size <= 0)
