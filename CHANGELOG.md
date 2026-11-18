@@ -114,6 +114,13 @@
   preload before package inclusion; `PanelTools` needed the tic-font
   parsing correction above. Plot creation does not establish pixel-identical
   output against gnuplot.
+- As of 2026-11-18, the `priority9` custom audit had completed its entire
+  **8/8**-case suite with no errors or skips: four graphical paths in `qcorr`
+  and four in `lagreg`, generating **8** Matplotlib figures. The maintained
+  `priority5`–`priority9` suites now total **48/48 PASS**, **53** figures
+  across **32** distinct contributed packages. No parser changes were needed
+  for `priority9`. These figures have not been established as pixel-identical
+  to gnuplot output.
 
 
 ## [0.12.0] - 2026-10-29
