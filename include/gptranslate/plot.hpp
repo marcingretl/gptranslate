@@ -98,6 +98,8 @@ struct Tics {
     std::optional<double> font_size{};
     // Gnuplot offsets tick-label text in character units along screen x/y.
     std::optional<std::array<double, 2>> label_offset;
+    // Explicit tc rgb/textcolor rgb colors the tick labels, not tick marks.
+    std::string label_color;
 };
 struct Axis {
     std::string label;
@@ -194,6 +196,16 @@ struct Plot {
         std::optional<double> font_size{};
     };
     std::vector<Label> labels;
+    // Persistent gnuplot arrows are drawn in data coordinates. Numbered arrows
+    // can be replaced or unset; an id of zero means an auto-numbered arrow.
+    struct Arrow {
+        int id{0};
+        double x0{}, y0{}, x1{}, y1{};
+        int line_type{1};
+        double width{1.0};
+        std::string color;
+    };
+    std::vector<Arrow> arrows;
     struct CircleSector {
         int id{};
         double start{}, end{360.0};

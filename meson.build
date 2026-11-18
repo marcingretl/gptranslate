@@ -324,3 +324,19 @@ test('fsboost-style-pointsize', py,
   args: [meson.current_source_dir() / 'tests' / 'check_fsboost_style_pointsize.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'fsboost-style-pointsize.gp',
          meson.current_build_dir() / 'fsboost-style-pointsize.py'])
+
+# pcaTools PCA biplots use persistent loading arrows, colored/sized labels,
+# and independently ranged secondary axes. Execute generated Python in Agg.
+test('pca-biplot-styles', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_pca_biplot_styles.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'pca-biplot-styles.gp',
+         meson.current_build_dir() / 'pca-biplot-styles.py'])
+
+# Small independent reproductions of the three pcaTools gnuplot constructs.
+# The combined runtime test above also verifies their Matplotlib semantics.
+foreach kind : ['arrow', 'label', 'tics']
+  test('pca-' + kind + '-syntax', py,
+    args: [check, exe.full_path(),
+           meson.current_source_dir() / 'tests' / ('pca-' + kind + '.gp'),
+           meson.current_build_dir() / ('pca-' + kind + '.py')])
+endforeach

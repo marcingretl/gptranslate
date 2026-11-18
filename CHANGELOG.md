@@ -142,6 +142,53 @@
   required for `priority11`. Successful figure creation does not prove
   pixel-identical results relative to gnuplot.
 
+
+- On 2026-11-18, the full `priority12` custom audit completed **8/8**
+  cases for two additional packages, `PairPlot` and `ketvals`, generating
+  **8** Matplotlib figures without failures or skips. The four `PairPlot`
+  fixtures exercise triangular, matrix, row and column layouts, grouping
+  and centroid labelling; the four `ketvals` fixtures cover time-varying
+  OLS/IV coefficients with 90% and 95% confidence levels. Across
+  `priority5`–`priority12` the maintained total is **72/72 PASS** and
+  **79** figures from **38** distinct packages. No new `gptranslate`
+  parser changes were necessary for `priority12`. Plot creation alone
+  does not establish pixel identity with gnuplot.
+
+
+- On 2026-11-18, the complete `priority13` custom audit passed **8/8**
+  cases for the previously untested `QMLSV` and `TVC` packages, yielding
+  **13** Matplotlib figures (five from QMLSV volatility/density and eight
+  from TVC time-varying coefficient paths) with no failures or skips.
+  The maintained `priority5`–`priority13` suites now total **80/80 PASS**
+  and **92** figures from **40** distinct packages. No parser changes
+  were required for `priority13`. Plot execution and figure generation
+  do not establish visual identity with gnuplot.
+
+
+- On 2026-11-18, the complete `priority14` contributed-package
+  integration suite passed **8/8** tests with **8** Matplotlib figures:
+  four `kmeans` cluster/scree/silhouette plots and four `GHegy` seasonal
+  unit-root-test plots. The previous missing `GHegy` coefficient data
+  and invalid assignment of the void-returning `kmeans_screeplot()` were
+  resolved at installation/fixture level, without modifying the
+  `gptranslate` parser or upstream package sources. The maintained
+  `priority5`–`priority14` total is now **88/88 PASS**, **100** figures
+  from **42** distinct packages. Plot creation does not demonstrate
+  pixel-identical output relative to gnuplot.
+
+
+- On 2026-11-18, the complete `priority15` contributed-package
+  integration suite passed **8/8** tests with **15** Matplotlib figures:
+  **11** from `BayTool` posterior density/MCMC diagnostics and **4** from
+  `ParMA` marginal posterior and sampling diagnostics. Initial BayTool
+  failures were caused by the test fixture passing a scalar `string` to
+  `BT_paramplot` instead of a `strings` array. The corrected fixtures use
+  `defarray(...)` and pass without modifying `gptranslate`, `gretl4py`
+  or libgretl. Across `priority5`–`priority15`, maintained coverage is
+  **96/96 PASS**, **115** figures and **44** distinct packages.
+  Visual fidelity relative to gnuplot was not evaluated.
+
+
 ## [0.12.0] - 2026-10-29
 
 First public, experimental release.

@@ -61,6 +61,10 @@ std::string mpl_color(const std::string& color) {
         if (color == "dark-green") {
             return "darkgreen";
         }
+        // Gnuplot has a built-in web-blue; Matplotlib does not recognize it.
+        if (color == "web-blue") {
+            return "#0080ff";
+        }
         return color;
     }
 
@@ -180,6 +184,9 @@ void emit_tics(std::ostringstream& o,
           << ", ha='right')\n";
     if (tics.font_size)
         o << target << ".tick_params(axis='" << axis << "', labelsize=" << *tics.font_size << ")\n";
+    if (!tics.label_color.empty())
+        o << target << ".tick_params(axis='" << axis
+          << "', labelcolor=" << pystr(mpl_color(tics.label_color)) << ")\n";
     if (tics.direction_explicit) {
         o << target << ".tick_params(axis='" << axis << "', direction='"
           << (tics.outward ? "out" : "in") << "')\n";
@@ -1351,6 +1358,16 @@ std::string MatplotlibBackend::generate(const Document& d) const {
               << pystr("C" + std::to_string((sector.line_type - 1) % 10))
               << ", edgecolor='white', linewidth=0.7, clip_on=False, zorder=3))\n";
         }
+        // Loading arrows belong to the current data coordinate system, not
+        // the secondary PCA loading tic axes or the full-figure coordinates.
+        for (const auto& arrow : p.arrows) {
+            o << "from matplotlib.patches import FancyArrowPatch\n";
+            o << "ax.add_patch(FancyArrowPatch((" << std::setprecision(17) << arrow.x0 << ", "
+              << arrow.y0 << "), (" << arrow.x1 << ", " << arrow.y1
+              << "), arrowstyle='->', mutation_scale=10, shrinkA=0, shrinkB=0, "
+              << "linewidth=" << arrow.width << ", color=" << pystr(mpl_color(arrow.color))
+              << ", zorder=4))\n";
+        }
         // Gnuplot labels may use either data or axes-relative graph coordinates.
         for (const auto& label : p.labels) {
             if (label.point_marker) {
@@ -1446,7 +1463,17 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             }
         }
         if (p.y2.tics.enabled && !twin) {
-            o << "right_ax = ax.secondary_yaxis('right')\n";
+            // Biplots use y2 coordinates for loading scales independent of the
+            // primary score range; preserve their explicit [-1:1] interval.
+            if (p.y2.min || p.y2.max) {
+                o << "right_ax = ax.twinx()\n";
+                if (p.y2.min)
+                    o << "right_ax.set_ylim(bottom=" << *p.y2.min << ")\n";
+                if (p.y2.max)
+                    o << "right_ax.set_ylim(top=" << *p.y2.max << ")\n";
+            } else {
+                o << "right_ax = ax.secondary_yaxis('right')\n";
+            }
             emit_tics(o, p.y2.tics, "y", "right_ax");
             if (p.my2tics > 1) {
                 o << "right_ax.yaxis.set_minor_locator(AutoMinorLocator(" << p.my2tics << "))\n";

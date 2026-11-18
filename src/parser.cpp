@@ -605,6 +605,12 @@ void parse_tics(Tics& tics, const std::string& spec) {
         if (*tics.font_size <= 0)
             throw std::runtime_error("invalid tic font size");
     }
+    // The text-color modifier is independent of tic size/direction and can
+    // appear between an interval and font (pcaTools secondary PCA axes).
+    static const std::regex tic_color_re(
+        R"GP((?:^|\s)(?:tc|textcolor)\s+rgb\s+(['"])([^'"]+)\1(?=\s|$))GP");
+    if (std::regex_search(spec, match, tic_color_re))
+        tics.label_color = match[2].str();
     // The default gnuplot offset coordinates are character cells. Preserve
     // both components separately: they move the labels, not the tick marks.
     // Non-character coordinate systems require a different conversion.
@@ -648,6 +654,7 @@ void parse_tics(Tics& tics, const std::string& spec) {
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)format\s+(['"])(.*?)\1)"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)scale\s+[^\s]+)"), " ");
     rest = std::regex_replace(rest, font_re, " ");
+    rest = std::regex_replace(rest, tic_color_re, " ");
     rest = std::regex_replace(rest, tic_offset_re, " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)nooffset(?=\s|$))"), " ");
     rest = std::regex_replace(rest, std::regex(R"((?:^|\s)in(?:\s|$))"), " ");
@@ -1697,6 +1704,58 @@ ParseResult parse(const std::string& source) {
             }
             if (s == "set angles degrees" || s == "set angles radians")
                 continue; // Circle arcs are specified explicitly in degrees.
+            // Gnuplot arrows are stateful annotations, not plot data series.
+            // Support the loading vectors emitted by pcaTools/gridplot, while
+            // rejecting other arrow styles rather than silently dropping them.
+            if (s == "unset arrow" || s == "set noarrow") {
+                p->arrows.clear();
+                continue;
+            }
+            if (starts(s, "unset arrow ")) {
+                const auto id = trim(s.substr(std::string("unset arrow ").size()));
+                if (!std::regex_match(id, std::regex(R"([0-9]+)")))
+                    throw std::runtime_error("unsupported arrow directive: " + s);
+                const int number = std::stoi(id);
+                p->arrows.erase(
+                    std::remove_if(p->arrows.begin(),
+                                   p->arrows.end(),
+                                   [number](const Plot::Arrow& a) { return a.id == number; }),
+                    p->arrows.end());
+                continue;
+            }
+            if (starts(s, "set arrow ")) {
+                static const std::regex arrow_re(
+                    R"GP(^set arrow(?:\s+([0-9]+))?\s+from\s+([^,\s]+)\s*,\s*([^,\s]+)\s+to\s+([^,\s]+)\s*,\s*([^,\s]+)\s+lt\s+(-?[0-9]+)\s+lw\s+([^\s]+)\s+lc\s+rgb\s+(['"])([^'"]+)\8\s*$)GP");
+                std::smatch m;
+                if (!std::regex_match(s, m, arrow_re))
+                    throw std::runtime_error("unsupported arrow directive: " + s);
+                const auto x0 = number(m[2].str()), y0 = number(m[3].str());
+                const auto x1 = number(m[4].str()), y1 = number(m[5].str());
+                const auto width = number(m[7].str());
+                if (!x0 || !y0 || !x1 || !y1 || !width || !std::isfinite(*width) || *width <= 0)
+                    throw std::runtime_error("invalid arrow coordinates or width: " + s);
+                Plot::Arrow arrow;
+                arrow.id = m[1].matched ? std::stoi(m[1].str()) : 0;
+                arrow.x0 = *x0;
+                arrow.y0 = *y0;
+                arrow.x1 = *x1;
+                arrow.y1 = *y1;
+                arrow.line_type = std::stoi(m[6].str());
+                arrow.width = *width;
+                arrow.color = m[9].str();
+                if (arrow.id) {
+                    const auto found =
+                        std::find_if(p->arrows.begin(), p->arrows.end(), [&](const Plot::Arrow& a) {
+                            return a.id == arrow.id;
+                        });
+                    if (found != p->arrows.end()) {
+                        *found = std::move(arrow);
+                        continue;
+                    }
+                }
+                p->arrows.push_back(std::move(arrow));
+                continue;
+            }
             // Reset text annotations before libgretl writes per-cell labels.
             if (std::regex_match(s, std::regex(R"(^unset label\s+[0-9]+$)"))) {
                 // Numbered labels may be reset between multiplot panels.
@@ -1721,6 +1780,10 @@ ParseResult parse(const std::string& source) {
                 // between the closing font quote and `center`.
                 static const std::regex styled_data_label_re(
                     R"GP(^set label\s+(["'])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^,\s]+?)(?:\s+font\s*(["'])[^"']*,([0-9]+)\5)?\s*center(?:\s+(?:front|back))*(?:\s+tc\s+rgb\s+["']([^"']+)["'])?\s*$)GP");
+                // pcaTools places the RGB text color and font before `front`,
+                // without an alignment keyword. These are ordinary data labels.
+                static const std::regex pca_data_label_re(
+                    R"GP(^set label\s+(?:[0-9]+\s+)?(['"])(.*?)\1\s+at\s+([^,\s]+)\s*,\s*([^,\s]+)\s+tc\s+rgb\s+(['"])([^'"]+)\5\s+font\s+(['"])[^'"]*,\s*([0-9]+(?:\.[0-9]+)?)\7(?:\s+(?:front|back))?\s*$)GP");
                 // PairPlot marks highlighted observations with numbered, empty
                 // point labels using explicit size, type and RGB color.
                 static const std::regex numbered_point_label_re(
@@ -1737,6 +1800,16 @@ ParseResult parse(const std::string& source) {
                     label.point_type = std::stoi(match[6].str());
                     label.point_line_type = std::stoi(match[7].str());
                     label.point_color = match[9].str();
+                    p->labels.push_back(std::move(label));
+                } else if (std::regex_match(s, match, pca_data_label_re)) {
+                    const double x = scalar_value(match[3].str(), plot_scalars);
+                    const double y = scalar_value(match[4].str(), plot_scalars);
+                    const double size = std::stod(match[8].str());
+                    if (!std::isfinite(size) || size <= 0)
+                        throw std::runtime_error("invalid label font size: " + s);
+                    Plot::Label label{match[2].str(), x, y, false, false};
+                    label.text_color = match[6].str();
+                    label.font_size = size;
                     p->labels.push_back(std::move(label));
                 } else if (std::regex_match(s, match, graph_label_re)) {
                     const double x = scalar_value(match[3].str(), plot_scalars);
