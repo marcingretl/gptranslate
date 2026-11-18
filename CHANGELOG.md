@@ -122,6 +122,25 @@
   for `priority9`. These figures have not been established as pixel-identical
   to gnuplot output.
 
+- On 2026-11-18, the `priority10` custom audit completed **8/8** cases
+  for two previously untested packages: `DynMultCalc` (dynamic/cumulative
+  multiplier plots at several confidence levels) and `ghosts` (spectrum,
+  coherence, phase and combined-panel plots), producing **8** Matplotlib
+  figures with zero failures or skips. Across maintained `priority5`–
+  `priority10` cases, the confirmed total is **56/56 PASS**, **61** figures
+  from **34** distinct contributed packages. `priority10` did not require
+  a new parser change. This does not establish pixel-identical rendering.
+
+
+- On 2026-11-18, the `priority11` custom audit completed **8/8** cases
+  for two additional packages, `FEP` and `PTconf`, producing **10**
+  Matplotlib figures: four asymmetric loss-function plots in `FEP`, and
+  six GG/SWP transitory-component plots in `PTconf`. The full run recorded
+  zero failures or skips. Across `priority5`–`priority11`, maintained
+  integration coverage is now **64/64 PASS**, **71** Matplotlib figures
+  for **36** distinct packages. No `gptranslate` parser changes were
+  required for `priority11`. Successful figure creation does not prove
+  pixel-identical results relative to gnuplot.
 
 ## [0.12.0] - 2026-10-29
 
