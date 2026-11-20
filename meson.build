@@ -367,3 +367,10 @@ test('threshold-panel-dash-loop', py,
 
 # Threshold_Panel places the legend below the x-axis label, not on top of it.
 test('key-outside-below', py, args: [meson.current_source_dir() / 'tests' / 'check_key_outside_below.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'threshold-panel-dash-loop.gp', meson.current_build_dir() / 'key-outside-below.py'])
+
+# Bounded set-for expansion reuses the existing line/linetype/label parser.
+# Include steps, descending ranges, quoted literals and original diagnostics.
+test('set-for-bounded', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_set_for_bounded.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'set-for-bounded.gp',
+         meson.current_build_dir() / 'set-for-bounded.py'])

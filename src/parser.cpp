@@ -559,6 +559,72 @@ std::vector<std::string> split_commands(const std::string& line) {
     commands.push_back(trim(line.substr(begin)));
     return commands;
 }
+// Expand only the bounded `set for` forms emitted by libgretl.
+// Gridplot repeats point sizes; Threshold_Panel assigns each
+// linetype its own numeric dash type. Arbitrary loops remain invalid.
+// The normal parser then handles colors, dash types, point sizes and styles;
+// no new gnuplot command or expression evaluator is introduced here.
+std::vector<std::string> expand_bounded_set_for(const std::string& command) {
+    if (!starts(command, "set for "))
+        return {command};
+    static const std::regex header(
+        R"(^set for\s+\[([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([+-]?[0-9]+)\s*:\s*([+-]?[0-9]+)(?:\s*:\s*([+-]?[0-9]+))?\s*\]\s+(.+)$)");
+    std::smatch match;
+    if (!std::regex_match(command, match, header))
+        throw std::runtime_error("unsupported set for directive: " + command);
+    const std::string variable = match[1].str();
+    const int first = std::stoi(match[2].str());
+    const int last = std::stoi(match[3].str());
+    const int step = match[4].matched ? std::stoi(match[4].str()) : (first <= last ? 1 : -1);
+    const std::string body = trim(match[5].str());
+    // The bounded expander is intentionally limited to numeric set directives.
+    // Keep the existing 256-linetype ceiling and reject nonterminating ranges.
+    if (first < 1 || first > 256 || last < 1 || last > 256 || step == 0 || step < -256 ||
+        step > 256 || (first < last && step < 0) || (first > last && step > 0) ||
+        starts(body, "for "))
+        throw std::runtime_error("invalid bounded set for directive: " + command);
+    std::vector<std::string> commands;
+    for (int value = first; step > 0 ? value <= last : value >= last; value += step) {
+        // Replace whole identifiers only, and never change quoted text.
+        // In particular, the variable name must not modify RGB names or labels.
+        std::string substituted;
+        char quote = 0;
+        bool used_variable = false;
+        for (size_t pos = 0; pos < body.size();) {
+            const char c = body[pos];
+            if (quote) {
+                substituted.push_back(c);
+                if (c == quote && (pos == 0 || body[pos - 1] != '\\'))
+                    quote = 0;
+                ++pos;
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+                substituted.push_back(c);
+                ++pos;
+            } else if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+                size_t end = pos + 1;
+                while (end < body.size() &&
+                       (std::isalnum(static_cast<unsigned char>(body[end])) || body[end] == '_'))
+                    ++end;
+                const auto token = body.substr(pos, end - pos);
+                if (token == variable) {
+                    substituted += std::to_string(value);
+                    used_variable = true;
+                } else {
+                    substituted += token;
+                }
+                pos = end;
+            } else {
+                substituted.push_back(c);
+                ++pos;
+            }
+        }
+        if (!used_variable)
+            throw std::runtime_error("unused set for variable: " + command);
+        commands.push_back("set " + substituted);
+    }
+    return commands;
+}
 // Parse named tic positions without conflating commas inside quoted labels.
 void parse_tics(Tics& tics, const std::string& spec) {
     tics.enabled = true;
@@ -1326,8 +1392,17 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 command_text = part + " " + trim(lines[++source_line]);
             }
             for (const auto& command : split_commands(command_text)) {
-                expanded.push_back(command);
-                source_lines.push_back(first_line);
+                try {
+                    // Each expanded command retains the physical source line.
+                    // Named data blocks were excluded above, so their contents
+                    // can never be interpreted as loop directives.
+                    for (const auto& item : expand_bounded_set_for(command)) {
+                        expanded.push_back(item);
+                        source_lines.push_back(first_line);
+                    }
+                } catch (const std::exception& e) {
+                    result.errors.push_back({first_line, e.what()});
+                }
             }
         }
     }
@@ -1425,38 +1500,6 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 } else {
                     plot_scalars[name] = scalar_value(expression, plot_scalars);
                     plot_strings.erase(name);
-                }
-                continue;
-            }
-            // Expand only the bounded `set for` forms emitted by libgretl.
-            // Gridplot repeats point sizes; Threshold_Panel assigns each
-            // linetype its own numeric dash type. Arbitrary loops remain invalid.
-            if (starts(s, "set for ")) {
-                static const std::regex linetype_loop(
-                    R"(^set for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([0-9]+)\s*:\s*([0-9]+)\s*\]\s+linetype\s+\1\s+(?:ps|pointsize)\s+(.+)$)");
-                static const std::regex dash_loop(
-                    R"(^set for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([0-9]+)\s*:\s*([0-9]+)\s*\]\s+linetype\s+\1\s+(?:dt|dashtype)\s+\1$)");
-                std::smatch match;
-                if (std::regex_match(s, match, linetype_loop)) {
-                    const int first = std::stoi(match[2].str());
-                    const int last = std::stoi(match[3].str());
-                    const auto size = number(match[4].str());
-                    if (first < 1 || last < first || last > 256 || !size || !std::isfinite(*size) ||
-                        *size <= 0)
-                        throw std::runtime_error("invalid linetype loop: " + s);
-                    for (int n = first; n <= last; ++n)
-                        linetype_point_sizes[n] = *size;
-                } else if (std::regex_match(s, match, dash_loop)) {
-                    const int first = std::stoi(match[2].str());
-                    const int last = std::stoi(match[3].str());
-                    // Only the five built-in numeric dash patterns used by
-                    // Threshold_Panel have a documented Matplotlib mapping.
-                    if (first < 1 || last < first || last > 5)
-                        throw std::runtime_error("unsupported linetype dash loop: " + s);
-                    for (int n = first; n <= last; ++n)
-                        linetype_dash_types[n] = n;
-                } else {
-                    throw std::runtime_error("unsupported set for directive: " + s);
                 }
                 continue;
             }
@@ -1567,6 +1610,8 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                             if (dt == "solid") {
                                 linetype_dash_types[n] = 1;
                             } else {
+                                // Only the five built-in numeric dash patterns used by
+                                // Threshold_Panel have a documented Matplotlib mapping.
                                 if (!std::regex_match(dt, std::regex(R"([1-5])")))
                                     throw std::runtime_error("unsupported linetype dash type: " +
                                                              s);
