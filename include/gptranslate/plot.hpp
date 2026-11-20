@@ -213,11 +213,15 @@ struct Plot {
         int line_type{1};
     };
     struct Rectangle {
+        enum class Coordinates { Data, Graph, Screen };
         int id{};
         double x0{}, y0{}, x1{}, y1{};
         std::string color;
         double alpha{1.0};
         bool clip{true};
+        // Graph uses the axes box and screen uses the entire figure.
+        Coordinates coordinates{Coordinates::Data};
+        bool behind{false};
     };
     // Gnuplot objects are independent of ordinary data series.
     std::vector<CircleSector> sectors;

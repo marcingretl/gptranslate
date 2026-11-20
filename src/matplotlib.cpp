@@ -1387,15 +1387,35 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "ax.set_box_aspect(1)\n";
             o << "ax.set_aspect('equal', adjustable='datalim')\n";
         }
-        // Gnuplot rectangles for Sankey node blocks live in data coordinates.
-        // `noclip` must also show the node strips outside xrange [0:1].
+        // Gnuplot rectangles can use data, graph (axes), or screen (figure)
+        // coordinates. 'behind' objects must stay below the plotted data.
         for (const auto& rect : p.rectangles) {
             o << "from matplotlib.patches import Rectangle\n";
-            o << "ax.add_patch(Rectangle((" << std::setprecision(17) << rect.x0 << ", " << rect.y0
-              << "), " << rect.x1 - rect.x0 << ", " << rect.y1 - rect.y0
-              << ", facecolor=" << pystr(rect.color) << ", alpha=" << rect.alpha
-              << ", edgecolor='none', clip_on=" << (rect.clip ? "True" : "False")
-              << ", zorder=2))\n";
+            // A full-figure screen background belongs to the Figure patch:
+            // otherwise an opaque Axes patch can hide it unpredictably.
+            if (rect.coordinates == Plot::Rectangle::Coordinates::Screen && rect.x0 == 0 &&
+                rect.y0 == 0 && rect.x1 == 1 && rect.y1 == 1) {
+                o << "fig.patch.set_facecolor(" << pystr(rect.color) << ")\n";
+                continue;
+            }
+            // The graph background can directly color the Axes patch, which
+            // guarantees proper layering under ticks, grid lines and artists.
+            if (rect.coordinates == Plot::Rectangle::Coordinates::Graph && rect.x0 == 0 &&
+                rect.y0 == 0 && rect.x1 == 1 && rect.y1 == 1) {
+                o << "ax.set_facecolor(" << pystr(rect.color) << ")\n";
+                continue;
+            }
+            const bool screen = rect.coordinates == Plot::Rectangle::Coordinates::Screen;
+            o << (screen ? "fig.add_artist(Rectangle((" : "ax.add_patch(Rectangle((")
+              << std::setprecision(17) << rect.x0 << ", " << rect.y0 << "), " << rect.x1 - rect.x0
+              << ", " << rect.y1 - rect.y0 << ", facecolor=" << pystr(rect.color)
+              << ", alpha=" << rect.alpha
+              << ", edgecolor='none', clip_on=" << (rect.clip ? "True" : "False");
+            if (rect.coordinates == Plot::Rectangle::Coordinates::Graph)
+                o << ", transform=ax.transAxes";
+            if (screen)
+                o << ", transform=fig.transFigure";
+            o << ", zorder=" << (rect.behind ? "-1" : "2") << "))\n";
         }
         // Piechart objects and graph-relative labels must use the same square
         // axes transform; otherwise screen fractions stretch a circle into an

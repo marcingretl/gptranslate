@@ -350,3 +350,10 @@ test('geoplot-indexed', py,
             exe.full_path(),
             meson.current_source_dir() / 'tests' / 'geoplot-indexed.gp',
             meson.current_source_dir() / 'tests' / 'geoplot-indexed-external.gp'])
+
+# DFM_Plot() screeplot uses unordered style modifiers, colored background
+# rectangles in screen/graph units, and gnuplot's singular linespoint alias.
+test('dfm-screeplot-style-background', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_dfm_screeplot_p24.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'dfm-screeplot-p24.gp',
+         meson.current_build_dir() / 'dfm-screeplot-p24.py'])
