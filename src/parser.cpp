@@ -104,6 +104,12 @@ std::string trim(std::string s) {
 bool starts(const std::string& s, const std::string& p) {
     return s.rfind(p, 0) == 0;
 }
+// libgretl geomaps derive their companion data file from gnuplot's ARG0.
+// Recognize only this bounded string expression, not arbitrary sprintf calls.
+bool geomap_datafile_expression(const std::string& expression) {
+    static const std::regex pattern(R"GP(^sprintf\s*\(\s*(['"])%s\.dat\1\s*,\s*ARG0\s*\)$)GP");
+    return std::regex_match(trim(expression), pattern);
+}
 // Gnuplot permits a quoted text argument immediately after its command name,
 // for example `set title'Example'`, without intervening whitespace.
 bool text_command(const std::string& s, const std::string& command) {
@@ -1187,6 +1193,10 @@ void resolve_conditionals(std::vector<std::string>& lines, std::vector<Diagnosti
                         if (!std::regex_match(command, item, assignment))
                             break; // Other commands are processed by the main parser.
                         try {
+                            // The geomap string assignment is source-path dependent;
+                            // leave it for the plotting pass rather than parsing as a number.
+                            if (geomap_datafile_expression(item[2].str()))
+                                continue;
                             variables[item[1].str()] = scalar_value(item[2].str(), variables);
                         } catch (const std::exception& e) {
                             errors.push_back({line_number, e.what()});
@@ -1208,7 +1218,7 @@ void resolve_conditionals(std::vector<std::string>& lines, std::vector<Diagnosti
     };
     block(true, false);
 }
-ParseResult parse(const std::string& source) {
+ParseResult parse(const std::string& source, const std::string& source_path) {
     ParseResult result;
     auto& d = result.document;
     d.plots.emplace_back();
@@ -1225,6 +1235,8 @@ ParseResult parse(const std::string& source) {
     // Keep scalar definitions local and in source order. The conditional pass
     // selects active lines; this pass resolves values at each plot command.
     std::map<std::string, double> plot_scalars;
+    // Keep source-dependent string variables separate from numeric scalars.
+    std::map<std::string, std::string> plot_strings;
     // Named cubic functions used by SankeyPlot's '+' sampled ribbons.
     std::map<std::string, std::string> ribbon_functions;
     std::istringstream input(source);
@@ -1360,8 +1372,19 @@ ParseResult parse(const std::string& source) {
             std::smatch scalar_assignment;
             static const std::regex scalar_pattern(R"(^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$)");
             if (std::regex_match(s, scalar_assignment, scalar_pattern)) {
-                plot_scalars[scalar_assignment[1].str()] =
-                    scalar_value(scalar_assignment[2].str(), plot_scalars);
+                const std::string name = scalar_assignment[1].str();
+                const std::string expression = scalar_assignment[2].str();
+                if (geomap_datafile_expression(expression)) {
+                    // Gnuplot's ARG0 is the input script path; libgretl writes
+                    // the coordinates to a companion <script>.dat file.
+                    if (source_path.empty())
+                        throw std::runtime_error("geomap ARG0 requires an input filename");
+                    plot_strings[name] = source_path + ".dat";
+                    plot_scalars.erase(name);
+                } else {
+                    plot_scalars[name] = scalar_value(expression, plot_scalars);
+                    plot_strings.erase(name);
+                }
                 continue;
             }
             // Expand the bounded `set for` form emitted by libgretl gridplot.
@@ -2838,6 +2861,10 @@ ParseResult parse(const std::string& source) {
                     if (parametric && std::regex_match(src, parametric_y))
                         throw std::runtime_error("parametric y(t) without preceding x(t): " + spec);
                     has_ordinary_sources = true;
+                    // Resolve a restricted source-dependent string assignment to
+                    // the same quoted file form used by ordinary data sources.
+                    if (const auto it = plot_strings.find(src); it != plot_strings.end())
+                        src = "\"" + it->second + "\"";
                     // Empty quoted sources reuse the preceding data file or named block.
                     if (src == "''" || src == "\"\"") {
                         if (previous_source.empty())

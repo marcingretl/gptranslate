@@ -4,6 +4,44 @@
 
 ### Contributed-package plotting compatibility
 
+- Verified the complete `priority20` integration suite on 20 November
+  2026: four package-native `ADMBP` `irf_plot()` / `irf_plotadv()` multiplier
+  cases (4 figures) and four `BVAR_post_plot()` coefficient-posterior
+  histogram cases (7 figures), **8/8 PASS, 11 Matplotlib figures**.
+  The BVAR outputs include a three-figure separate-plot case and a
+  two-figure combined-grid case. The initial ADMBP failure was addressed
+  at the fixture level by initializing a dataset; no translator or
+  libgretl changes were needed. `ADMBP` is new to the maintained audit;
+  `BVAR` was already covered in `priority16`. Maintained `priority5`–
+  `priority20` suites now total **136/136 PASS, 158 figures across
+  52 distinct packages**. Figure creation does not establish visual
+  equivalence with gnuplot.
+
+- Verified the complete `priority19` integration suite on 20 November
+  2026: four `MAR` LSE/MLE GIRF figures and four `Holt` 2.0 forecast,
+  component, confidence-interval and pseudo-out-of-sample figures,
+  **8/8 PASS, 8 Matplotlib figures**. `MAR` is new to the maintained
+  audit; `Holt` was already tested in `priority6`. These eight cases use
+  **package-native plotting APIs**. No `gptranslate`, libgretl or package
+  code changes were needed. Maintained `priority5`–`priority19` suites
+  now total **128/128 PASS, 147 figures across 51 distinct packages**.
+
+- Verified the full `priority18` integration suite on 20 November 2026:
+  `StrucTiSM` BSM/LLT estimated-component plots (4) and `FLS` coefficient-path
+  visualizations (4), **8/8 PASS, 8 Matplotlib figures**. These are
+  **package-output** plotting tests using gretl's standard graphics commands,
+  not package-native `.gp` emitters. No gptranslate, libgretl, or package
+  changes were needed. Maintained `priority5`–`priority18` suites now total
+  **120/120 PASS, 139 figures across 50 distinct packages**.
+
+- Verified `priority17` integration coverage for `gig` GARCH/GJR volatility
+  and density plots and `CUB` ordinal probability distributions: **8/8 PASS**,
+  8 Matplotlib figures. The two initial CUB failures were corrected solely
+  in fixture calls to the CUB 2.0 `CUB_setup(y, opts)` API; no translator or
+  libgretl changes were needed. Maintained `priority5`–`priority17` suites
+  now total **112/112 PASS, 131 figures and 48 distinct packages**.
+
+
 - Added palette-based color mapping for `color_xy`, including `set palette negative`,
   mapped 2D `splot` data and `linespoints` colored via `lt palette`.
 - Added gnuplot pie-chart constructs, including scalar arithmetic assignments,
@@ -46,6 +84,13 @@
 - Fixed parsing of gnuplot tic modifiers with a spaced font specification
   such as `font ", 8"` (found in `PanelTools`). A headless regression
   checks the resulting tick-label font size.
+- Extended the plot IR, parser and Matplotlib backend for `pcaTools`
+  biplots: numbered `set arrow` and `unset arrow`, styled loading vectors,
+  `set label` font/`tc rgb` modifiers, tic-label text colours for x/y/x2/y2,
+  and proper handling of secondary-axis ranges and the named `web-blue`
+  palette colour. Added headless arrow, label and tic regressions that
+  execute the translated Python. Both previously failing biplots then
+  passed through gretl4py with no libgretl changes.
 - Extended named line styles to accept `ps` / `pointsize`, including
   point-size-only definitions such as `set style line 1 ps 0.02` used by
   `fsboost`. Specified point sizes are propagated to Matplotlib markers
@@ -187,6 +232,16 @@
   or libgretl. Across `priority5`–`priority15`, maintained coverage is
   **96/96 PASS**, **115** figures and **44** distinct packages.
   Visual fidelity relative to gnuplot was not evaluated.
+
+
+- On 2026-11-18, the complete `priority16` custom suite passed **8/8**
+  cases with **8** Matplotlib figures: four `pcaTools` PCA scree/biplot
+  cases and four `BVAR` Bayesian forecast/IRF cases. Initially the two
+  biplot cases failed on unsupported `set arrow`, label/tic colours and
+  fonts; after the translator patch both passed and the complete batch
+  returned zero failures/skips. The maintained `priority5`–`priority16`
+  baseline is now **104/104 PASS**, **123** figures across **46** packages.
+  Visual equivalence to gnuplot is not claimed.
 
 
 ## [0.12.0] - 2026-10-29

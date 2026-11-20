@@ -340,3 +340,6 @@ foreach kind : ['arrow', 'label', 'tics']
            meson.current_source_dir() / 'tests' / ('pca-' + kind + '.gp'),
            meson.current_build_dir() / ('pca-' + kind + '.py')])
 endforeach
+
+# Geomap uses the source script name (gnuplot ARG0) to find its adjacent .dat.
+test('geomap-arg0', py, args: [meson.current_source_dir() / 'tests' / 'check_geomap_arg0.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'geomap-arg0.gp'])

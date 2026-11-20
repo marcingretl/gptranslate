@@ -20,5 +20,6 @@
 #include "plot.hpp"
 #include <string>
 namespace gptranslate {
-ParseResult parse(const std::string& source);
-}
+// The optional path supplies gnuplot's ARG0 for script-relative data files.
+ParseResult parse(const std::string& source, const std::string& source_path = {});
+} // namespace gptranslate

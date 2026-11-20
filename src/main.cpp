@@ -190,7 +190,8 @@ int main(int argc, char** argv) {
             }
             return 0;
         }
-        auto result = gptranslate::parse(source);
+        // Provide the input filename for geomap's ARG0-based data source.
+        auto result = gptranslate::parse(source, input);
         for (const auto& warning : result.warnings)
             std::cerr << "warning:" << warning.line << ": " << warning.message << '\n';
         for (const auto& error : result.errors)
