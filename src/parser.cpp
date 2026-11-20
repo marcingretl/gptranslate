@@ -168,14 +168,25 @@ std::vector<std::string> split_specs(const std::string& s, bool decimal_comma = 
     out.push_back(trim(s.substr(begin)));
     return out;
 }
-// Gnuplot's `index` addresses datasets separated by *two* blank rows.
-// Preserve single blank rows inside a dataset: they delimit polygon rings.
+// Gnuplot's `index` addresses datasets separated by two blank records.
+// libgretl also emits `# end of entity` followed by a blank row, so handle
+// that explicit marker as an entity boundary. Single blank rows inside an
+// entity separate disconnected polygon rings.
 std::vector<std::vector<std::string>> indexed_groups(const std::vector<std::string>& rows) {
     std::vector<std::vector<std::string>> groups;
     std::vector<std::string> group;
     unsigned int blanks = 0;
     for (const auto& row : rows) {
-        if (trim(row).empty()) {
+        const std::string record = trim(row);
+        if (record == "# end of entity") {
+            // The map writer puts this marker before the final blank row.
+            // Treat it as a dataset terminator, not as a regular comment.
+            if (!group.empty()) {
+                groups.push_back(std::move(group));
+                group.clear();
+            }
+            blanks = 0;
+        } else if (record.empty()) {
             ++blanks;
             if (blanks == 2 && !group.empty()) {
                 groups.push_back(std::move(group));

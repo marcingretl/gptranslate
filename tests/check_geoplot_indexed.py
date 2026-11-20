@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 
 executor, named_fixture, external_fixture = sys.argv[1:4]
 
+# The named block uses two blank rows; the external file uses libgretl's
+# `# end of entity` marker plus one blank row. Both must preserve per-state z.
 for filename in (named_fixture, external_fixture):
     with tempfile.TemporaryDirectory() as directory:
         script = pathlib.Path(directory) / "map.py"
