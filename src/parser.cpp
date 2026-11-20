@@ -168,6 +168,30 @@ std::vector<std::string> split_specs(const std::string& s, bool decimal_comma = 
     out.push_back(trim(s.substr(begin)));
     return out;
 }
+// Gnuplot's `index` addresses datasets separated by *two* blank rows.
+// Preserve single blank rows inside a dataset: they delimit polygon rings.
+std::vector<std::vector<std::string>> indexed_groups(const std::vector<std::string>& rows) {
+    std::vector<std::vector<std::string>> groups;
+    std::vector<std::string> group;
+    unsigned int blanks = 0;
+    for (const auto& row : rows) {
+        if (trim(row).empty()) {
+            ++blanks;
+            if (blanks == 2 && !group.empty()) {
+                groups.push_back(std::move(group));
+                group.clear();
+            }
+            if (blanks == 1 && !group.empty())
+                group.push_back("");
+        } else {
+            blanks = 0;
+            group.push_back(row);
+        }
+    }
+    if (!group.empty())
+        groups.push_back(std::move(group));
+    return groups;
+}
 // Parse numeric tokens independently of the process-wide C/Python locale.
 // A decimal comma is accepted only within a single numeric token.
 std::optional<double> number(std::string s) {
@@ -2809,8 +2833,8 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 continue;
             }
             if (starts(s, "plot ")) {
-                if (!p->series.empty() || !p->images.empty() || !p->contours.empty() ||
-                    !p->surfaces.empty() || !p->palette_xy.empty()) {
+                if (!p->series.empty() || !p->polygons.empty() || !p->images.empty() ||
+                    !p->contours.empty() || !p->surfaces.empty() || !p->palette_xy.empty()) {
                     const auto panel_index = p->panel_index;
                     d.plots.emplace_back();
                     p = &d.plots.back();
@@ -2822,6 +2846,80 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                     command += " " + trim(lines[++i]);
                 }
                 auto specs = split_specs(command, decimal_comma);
+                // libgretl's geoplot emits `plot for [i=0:*] source index i
+                // with filledcurves fc palette`. Restrict this expansion to
+                // precisely that map form; do not evaluate general gnuplot loops.
+                static const std::regex map_loop(
+                    R"GP(^for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*0\s*:\s*\*\s*\]\s+(\S+)\s+index\s+\1\s+(?:with|w)\s+filledcurves?\s+fc\s+palette(?:\s+.*)?$)GP");
+                // Use the same file cache as ordinary sources for external geomaps.
+                auto load_map_rows = [&](std::string src) -> const std::vector<std::string>& {
+                    if (const auto text = plot_strings.find(src); text != plot_strings.end())
+                        src = "\"" + text->second + "\"";
+                    if (const auto block = d.data_blocks.find(src); block != d.data_blocks.end())
+                        return block->second;
+                    if (src.size() < 2 || (src.front() != '\'' && src.front() != '"') ||
+                        src.back() != src.front())
+                        throw std::runtime_error("unsupported geoplot loop source: " + src);
+                    if (const auto cached = external_data.find(src); cached != external_data.end())
+                        return cached->second;
+                    const std::string filename = unquote(src);
+                    std::ifstream file(filename);
+                    if (!file)
+                        throw std::runtime_error("cannot open data file: " + filename);
+                    std::vector<std::string> rows;
+                    std::string record;
+                    while (std::getline(file, record))
+                        rows.push_back(record);
+                    return external_data.emplace(src, std::move(rows)).first->second;
+                };
+                // Materialize each geographic polygon as a separate IR object;
+                // the rest of the command (typically white state boundaries)
+                // follows the regular plot-series path below.
+                std::vector<std::string> ordinary_specs;
+                for (const auto& spec : specs) {
+                    if (!starts(spec, "for ")) {
+                        ordinary_specs.push_back(spec);
+                        continue;
+                    }
+                    std::smatch match;
+                    if (!std::regex_match(spec, match, map_loop))
+                        throw std::runtime_error("unsupported plot iteration: " + spec);
+                    const auto groups = indexed_groups(load_map_rows(match[2].str()));
+                    if (groups.empty() || groups.size() > 10000)
+                        throw std::runtime_error("invalid geoplot dataset count");
+                    for (const auto& group : groups) {
+                        Plot::MapPolygon polygon;
+                        std::vector<Point> ring;
+                        std::optional<double> palette;
+                        for (const auto& line : group) {
+                            const std::string text = trim(line);
+                            if (text.empty()) {
+                                // A single blank row separates disconnected rings.
+                                if (ring.size() >= 3)
+                                    polygon.rings.push_back(std::move(ring));
+                                ring.clear();
+                                continue;
+                            }
+                            if (text[0] == '#')
+                                continue;
+                            std::istringstream row(text);
+                            double x, y, z;
+                            if (!(row >> x >> y >> z) || !std::isfinite(x) || !std::isfinite(y) ||
+                                !std::isfinite(z))
+                                throw std::runtime_error("invalid geoplot polygon row: " + text);
+                            ring.push_back({x, y});
+                            if (!palette)
+                                palette = z;
+                        }
+                        if (ring.size() >= 3)
+                            polygon.rings.push_back(std::move(ring));
+                        if (!polygon.rings.empty() && palette) {
+                            polygon.palette_value = *palette;
+                            p->polygons.push_back(std::move(polygon));
+                        }
+                    }
+                }
+                specs = std::move(ordinary_specs);
                 // Parametric functions and data sources can coexist in a single
                 // gnuplot plot command. CUB places ellipse pairs before the
                 // original inline observations; the latter must still consume
@@ -3274,7 +3372,18 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                                 break;
                             }
                         }
-                        if (dat.empty() || dat[0] == '#')
+                        if (dat.empty()) {
+                            // Two-dimensional geographic outlines contain blank
+                            // separators between disconnected state boundaries.
+                            // Matplotlib must not connect those polygons by a line.
+                            if (named_rows && ser.style == Style::Lines && !ser.points.empty() &&
+                                std::isfinite(ser.points.back().x)) {
+                                const double gap = std::numeric_limits<double>::quiet_NaN();
+                                ser.points.push_back({gap, gap});
+                            }
+                            continue;
+                        }
+                        if (dat[0] == '#')
                             continue;
                         std::istringstream ds(dat);
                         std::vector<std::string> cells;
@@ -3427,6 +3536,7 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                     // Advance the layout cursor after each plotted panel.
                     ++next.panel_index;
                     next.series.clear();
+                    next.polygons.clear();
                     next.histogram_categories.clear();
                     next.images.clear();
                     next.contours.clear();

@@ -286,6 +286,14 @@ struct Plot {
     int border{15};
     std::string border_color;
     std::vector<Series> series;
+    // Geoplot's indexed filledcurves are closed polygons, not confidence bands.
+    // Each indexed data group carries one quantitative palette coordinate.
+    struct MapPolygon {
+        // One data index may contain disconnected rings separated by blank lines.
+        std::vector<std::vector<Point>> rings;
+        double palette_value{};
+    };
+    std::vector<MapPolygon> polygons;
     std::vector<ImageMatrix> images;
     std::vector<ContourGrid> contours;
     // Render real 3D matrix surfaces separately from projected contours.

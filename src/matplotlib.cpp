@@ -222,7 +222,12 @@ std::string numbers(const std::vector<Point>& pts, bool x) {
         if (i) {
             o << ',';
         }
-        o << (x ? pts[i].x : pts[i].y);
+        const double value = x ? pts[i].x : pts[i].y;
+        // A missing geographic line point separates disconnected polygons.
+        if (std::isfinite(value))
+            o << value;
+        else
+            o << "float('nan')";
     }
     return o.str() + ']';
 }
@@ -626,6 +631,53 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                       << pystr(p.colors.label) << "))\n";
                 } else {
                     o << "_gp_colorbar = fig.colorbar(ax.images[-1], ax=ax)\n";
+                    if (!p.colors.label.empty())
+                        o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
+                }
+            }
+        }
+        // Geoplot's indexed filledcurves represent map polygons. Use patches,
+        // not fill_between(), which instead represents confidence bands.
+        if (!p.polygons.empty()) {
+            double minimum = p.polygons.front().palette_value;
+            double maximum = minimum;
+            for (const auto& polygon : p.polygons) {
+                minimum = std::min(minimum, polygon.palette_value);
+                maximum = std::max(maximum, polygon.palette_value);
+            }
+            o << "from matplotlib.patches import Polygon as _gp_Polygon\n";
+            o << "from matplotlib.cm import ScalarMappable as _gp_ScalarMappable\n";
+            o << "_gp_map_cmap = "
+              << (p.colors.stops.empty() && !p.colors.negative ? "plt.get_cmap('viridis')" : "cmap")
+              << "\n";
+            o << "_gp_map_norm = Normalize(vmin=" << std::setprecision(17)
+              << p.colors.min.value_or(minimum) << ", vmax=" << p.colors.max.value_or(maximum)
+              << ")\n";
+            for (const auto& polygon : p.polygons) {
+                // Keep disconnected rings distinct, even when they share one
+                // color-axis value (e.g. islands of the same state).
+                for (const auto& ring : polygon.rings) {
+                    o << "ax.add_patch(_gp_Polygon([";
+                    for (size_t vertex = 0; vertex < ring.size(); ++vertex) {
+                        if (vertex)
+                            o << ", ";
+                        o << "(" << ring[vertex].x << ", " << ring[vertex].y << ")";
+                    }
+                    o << "], closed=True, facecolor=_gp_map_cmap(_gp_map_norm("
+                      << polygon.palette_value << ")), edgecolor='none', linewidth=0, zorder=1))\n";
+                }
+            }
+            o << "ax.autoscale_view()\n";
+            if (p.colorbox) {
+                o << "_gp_map_mappable = _gp_ScalarMappable(norm=_gp_map_norm, "
+                     "cmap=_gp_map_cmap)\n";
+                if (p.colorbox_position) {
+                    const auto& rect = *p.colorbox_position;
+                    o << "_gp_manual_colorbars.append((_gp_map_mappable, (" << rect[0] << ", "
+                      << rect[1] << ", " << rect[2] << ", " << rect[3] << "), "
+                      << pystr(p.colors.label) << "))\n";
+                } else {
+                    o << "_gp_colorbar = fig.colorbar(_gp_map_mappable, ax=ax)\n";
                     if (!p.colors.label.empty())
                         o << "_gp_colorbar.set_label(" << pystr(p.colors.label) << ")\n";
                 }
