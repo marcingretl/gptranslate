@@ -357,3 +357,13 @@ test('dfm-screeplot-style-background', py,
   args: [meson.current_source_dir() / 'tests' / 'check_dfm_screeplot_p24.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'dfm-screeplot-p24.gp',
          meson.current_build_dir() / 'dfm-screeplot-p24.py'])
+
+# Threshold_Panel uses bounded numeric linetype dash loops for LR profiles.
+# Verify inherited colors/widths, five patterns and explicit overrides.
+test('threshold-panel-dash-loop', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_threshold_panel_dash_loop.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'threshold-panel-dash-loop.gp',
+         meson.current_build_dir() / 'threshold-panel-dash-loop.py'])
+
+# Threshold_Panel places the legend below the x-axis label, not on top of it.
+test('key-outside-below', py, args: [meson.current_source_dir() / 'tests' / 'check_key_outside_below.py', exe.full_path(), meson.current_source_dir() / 'tests' / 'threshold-panel-dash-loop.gp', meson.current_build_dir() / 'key-outside-below.py'])

@@ -51,7 +51,8 @@ struct Series {
     std::optional<double> color_alpha;
     Style style{Style::Lines};
 
-    // Gnuplot dash type: 1 = solid, 2 = dashed.
+    // Gnuplot numeric dash type, 1-5: solid, dashed, dotted,
+    // dash-dot and dash-dot-dot.
     int dash_type{1};
     // Original gnuplot line type; zero marks the dotted boxplot notch bounds.
     int line_type{-1};

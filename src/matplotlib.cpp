@@ -950,6 +950,12 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             } else if (s.dash_type == 3) {
                 // Gnuplot's line type 0 uses a dotted reference line.
                 o << "kw['linestyle'] = ':'\n";
+            } else if (s.dash_type == 4) {
+                // The fourth numeric pattern alternates dashes and dots.
+                o << "kw['linestyle'] = '-.'\n";
+            } else if (s.dash_type == 5) {
+                // Retain the fifth pattern's two dots between long dashes.
+                o << "kw['linestyle'] = (0, (6, 2, 1, 2, 1, 2))\n";
             }
             // Palette coordinates for financial candles and volume bars are
             // independent of their ordinary style/line type colors.
@@ -1576,7 +1582,11 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                                                                         : "center ") +
                                                 (h == "left" ? "right" : "left");
                 const std::string x = h == "left" ? "-0.02" : h == "right" ? "1.02" : "0.5";
-                const std::string y = v == "top" ? "1.02" : v == "bottom" ? "-0.02" : "0.5";
+                // A below-centered key needs room for the x tick labels and
+                // xlabel; anchoring it at -0.02 would overlap both.
+                const std::string y = v == "top"    ? "1.02"
+                                    : v == "bottom" ? (h == "center" ? "-0.16" : "-0.02")
+                                                    : "0.5";
                 // Long vertical outside legends need multiple columns and more figure
                 // width. Compute the column count at runtime from the actual figure
                 // height.

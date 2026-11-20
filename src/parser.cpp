@@ -1349,6 +1349,9 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
     // Gnuplot linetype point sizes are independent of named line styles and
     // apply to point-bearing series which select a corresponding line type.
     std::map<int, double> linetype_point_sizes;
+    // Linetype dash patterns are independent of point sizes and named line
+    // styles. Threshold_Panel assigns a separate pattern to each LR curve.
+    std::map<int, int> linetype_dash_types;
     // Preserve the 2D contour view as parser state. A real 3D splot stays
     // unsupported until the separate surface backend is implemented.
     bool contour_base = false;
@@ -1425,23 +1428,36 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 }
                 continue;
             }
-            // Expand the bounded `set for` form emitted by libgretl gridplot.
-            // Only a repeated linetype point-size assignment is supported:
-            // arbitrary gnuplot loops are not executed by the translator.
+            // Expand only the bounded `set for` forms emitted by libgretl.
+            // Gridplot repeats point sizes; Threshold_Panel assigns each
+            // linetype its own numeric dash type. Arbitrary loops remain invalid.
             if (starts(s, "set for ")) {
                 static const std::regex linetype_loop(
                     R"(^set for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([0-9]+)\s*:\s*([0-9]+)\s*\]\s+linetype\s+\1\s+(?:ps|pointsize)\s+(.+)$)");
+                static const std::regex dash_loop(
+                    R"(^set for\s+\[([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([0-9]+)\s*:\s*([0-9]+)\s*\]\s+linetype\s+\1\s+(?:dt|dashtype)\s+\1$)");
                 std::smatch match;
-                if (!std::regex_match(s, match, linetype_loop))
+                if (std::regex_match(s, match, linetype_loop)) {
+                    const int first = std::stoi(match[2].str());
+                    const int last = std::stoi(match[3].str());
+                    const auto size = number(match[4].str());
+                    if (first < 1 || last < first || last > 256 || !size || !std::isfinite(*size) ||
+                        *size <= 0)
+                        throw std::runtime_error("invalid linetype loop: " + s);
+                    for (int n = first; n <= last; ++n)
+                        linetype_point_sizes[n] = *size;
+                } else if (std::regex_match(s, match, dash_loop)) {
+                    const int first = std::stoi(match[2].str());
+                    const int last = std::stoi(match[3].str());
+                    // Only the five built-in numeric dash patterns used by
+                    // Threshold_Panel have a documented Matplotlib mapping.
+                    if (first < 1 || last < first || last > 5)
+                        throw std::runtime_error("unsupported linetype dash loop: " + s);
+                    for (int n = first; n <= last; ++n)
+                        linetype_dash_types[n] = n;
+                } else {
                     throw std::runtime_error("unsupported set for directive: " + s);
-                const int first = std::stoi(match[2].str());
-                const int last = std::stoi(match[3].str());
-                const auto size = number(match[4].str());
-                if (first < 1 || last < first || last > 256 || !size || !std::isfinite(*size) ||
-                    *size <= 0)
-                    throw std::runtime_error("invalid linetype loop: " + s);
-                for (int n = first; n <= last; ++n)
-                    linetype_point_sizes[n] = *size;
+                }
                 continue;
             }
             // Set the default size for subsequent point-bearing plot items.
@@ -1539,6 +1555,23 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                             if (!size || !std::isfinite(*size) || *size <= 0)
                                 throw std::runtime_error("invalid linetype pointsize: " + s);
                             linetype_point_sizes[n] = *size;
+                        }
+                        // A later single-linetype dash assignment overrides a
+                        // prior `set for` value without clearing its color.
+                        auto dt = keyword_value(s, "dt");
+                        if (dt.empty())
+                            dt = keyword_value(s, "dashtype");
+                        if (!dt.empty()) {
+                            // Contour plots use `dt solid`; this is the same
+                            // solid stroke as numeric dash type 1.
+                            if (dt == "solid") {
+                                linetype_dash_types[n] = 1;
+                            } else {
+                                if (!std::regex_match(dt, std::regex(R"([1-5])")))
+                                    throw std::runtime_error("unsupported linetype dash type: " +
+                                                             s);
+                                linetype_dash_types[n] = std::stoi(dt);
+                            }
                         }
                         // Keep the per-level line width for 2D contour plots.
                         if (const auto width = number(keyword_value(s, "lw"))) {
@@ -2187,6 +2220,7 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 p->panel_index = panel_index;
                 named_line_styles.clear();
                 linetype_point_sizes.clear();
+                linetype_dash_types.clear();
                 // These flags are global Gnuplot state, not per-plot fields.
                 contour_base = false;
                 contour_view_map = false;
@@ -3210,6 +3244,16 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                     if (lt.empty()) {
                         lt = keyword_value(spec, "linetype");
                     }
+                    // When a script customizes numeric linetypes but a plot
+                    // item has no explicit lt/ls, gnuplot selects the next
+                    // linetype in series order. Apply this only for the bounded
+                    // dash palette defined above; other plots are unchanged.
+                    if (lt.empty() && keyword_value(spec, "ls").empty() &&
+                        !linetype_dash_types.empty()) {
+                        const int next = static_cast<int>(p->series.size()) + 1;
+                        if (linetype_dash_types.count(next))
+                            lt = std::to_string(next);
+                    }
                     // Preserve the original line type for candlestick notch markers.
                     if (!lt.empty()) {
                         ser.line_type = std::stoi(lt);
@@ -3217,15 +3261,23 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                     // A selected line type is explicit even if its palette entry is
                     // absent.
                     ser.explicit_color = ser.explicit_color || !lt.empty();
+                    // Apply the linetype's numeric dash and width defaults.
+                    // Explicit item modifiers below override these values.
+                    if (ser.line_type > 0) {
+                        if (const auto it = linetype_dash_types.find(ser.line_type);
+                            it != linetype_dash_types.end())
+                            ser.dash_type = it->second;
+                        if (static_cast<size_t>(ser.line_type) <= d.linetype_widths.size())
+                            ser.width = d.linetype_widths[ser.line_type - 1];
+                    }
                     // Preserve the gnuplot dash type for the rendering backend.
-                    const std::string dt = keyword_value(spec, "dt");
+                    auto dt = keyword_value(spec, "dt");
+                    if (dt.empty())
+                        dt = keyword_value(spec, "dashtype");
                     if (!dt.empty()) {
-                        try {
-                            ser.dash_type = std::stoi(dt);
-                        } catch (const std::exception&) {
-                            // Keep the default solid line for unsupported dash
-                            // specifications.
-                        }
+                        if (!std::regex_match(dt, std::regex(R"([1-5])")))
+                            throw std::runtime_error("unsupported plot dash type: " + dt);
+                        ser.dash_type = std::stoi(dt);
                     }
                     if (ser.color.empty() && !lt.empty()) {
                         int n = std::stoi(lt);
