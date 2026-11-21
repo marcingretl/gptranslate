@@ -374,3 +374,10 @@ test('set-for-bounded', py,
   args: [meson.current_source_dir() / 'tests' / 'check_set_for_bounded.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'set-for-bounded.gp',
          meson.current_build_dir() / 'set-for-bounded.py'])
+
+# ARprobit's gnuplot --band creates translucent recession rectangles in
+# mixed data-x/graph-y coordinates; keep them behind the probability curve.
+test('arprobit-recession-bands', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_arprobit_recession_bands.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'arprobit-recession-bands.gp',
+         meson.current_build_dir() / 'arprobit-recession-bands.py'])

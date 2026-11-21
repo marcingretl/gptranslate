@@ -1804,6 +1804,35 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 // rectangles, unlike Sankey's numbered data-space rectangles.
                 static const std::regex background_rectangle(
                     R"GP(^set (?:obj|object)(?:\s+(\d+))?\s+rect(?:angle)?\s+from\s+(screen|graph)\s+([^,]+),\s*([^\s]+)\s+to\s+(screen|graph)\s+([^,]+),\s*([^\s]+)\s+behind\s+(?:fillcolor|fc)\s+rgb\s+(['"])(#[0-9a-fA-F]{6})\8\s+fillstyle\s+solid\s+noborder\s*$)GP");
+                // Recession bands emitted by gretl's gnuplot --band have x
+                // positions in data units but cover the whole graph height.
+                // Preserve the mixed coordinate system and transparency.
+                static const std::regex data_graph_rectangle(
+                    R"GP(^set (?:obj|object)\s+(\d+)\s+rect(?:angle)?\s+from\s+([^,]+),\s*graph\s+([^\s]+)\s+to\s+([^,]+),\s*graph\s+([^\s]+)\s+(?:back|behind)\s+fillstyle\s+solid\s+([0-9]*\.?[0-9]+)\s+noborder\s+(?:fc|fillcolor)\s+rgb\s+(['"])(#[0-9a-fA-F]{6})\7\s*$)GP");
+                if (std::regex_match(s, obj, data_graph_rectangle)) {
+                    Plot::Rectangle rect;
+                    rect.id = std::stoi(obj[1].str());
+                    rect.coordinates = Plot::Rectangle::Coordinates::DataXGraphY;
+                    rect.x0 = scalar_value(obj[2].str(), plot_scalars);
+                    rect.y0 = scalar_value(obj[3].str(), plot_scalars);
+                    rect.x1 = scalar_value(obj[4].str(), plot_scalars);
+                    rect.y1 = scalar_value(obj[5].str(), plot_scalars);
+                    rect.alpha = scalar_value(obj[6].str(), plot_scalars);
+                    if (!std::isfinite(rect.x0) || !std::isfinite(rect.y0) ||
+                        !std::isfinite(rect.x1) || !std::isfinite(rect.y1) || rect.x1 <= rect.x0 ||
+                        rect.y1 <= rect.y0 || rect.alpha < 0 || rect.alpha > 1)
+                        throw std::runtime_error("invalid data/graph rectangle: " + s);
+                    rect.color = obj[8].str();
+                    rect.behind = true;
+                    auto found = std::find_if(p->rectangles.begin(),
+                                              p->rectangles.end(),
+                                              [&](const auto& item) { return item.id == rect.id; });
+                    if (found == p->rectangles.end())
+                        p->rectangles.push_back(std::move(rect));
+                    else
+                        *found = std::move(rect);
+                    continue;
+                }
                 if (std::regex_match(s, obj, background_rectangle)) {
                     if (obj[2].str() != obj[5].str())
                         throw std::runtime_error("mixed rectangle coordinate spaces: " + s);

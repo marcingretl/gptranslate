@@ -1393,8 +1393,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             o << "ax.set_box_aspect(1)\n";
             o << "ax.set_aspect('equal', adjustable='datalim')\n";
         }
-        // Gnuplot rectangles can use data, graph (axes), or screen (figure)
-        // coordinates. 'behind' objects must stay below the plotted data.
+        // Gnuplot rectangles can use data, graph (axes), screen (figure), or
+        // mixed data-x/graph-y coordinates. 'behind' objects stay below data.
         for (const auto& rect : p.rectangles) {
             o << "from matplotlib.patches import Rectangle\n";
             // A full-figure screen background belongs to the Figure patch:
@@ -1412,6 +1412,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 continue;
             }
             const bool screen = rect.coordinates == Plot::Rectangle::Coordinates::Screen;
+            if (rect.coordinates == Plot::Rectangle::Coordinates::DataXGraphY)
+                o << "from matplotlib.transforms import blended_transform_factory\n";
             o << (screen ? "fig.add_artist(Rectangle((" : "ax.add_patch(Rectangle((")
               << std::setprecision(17) << rect.x0 << ", " << rect.y0 << "), " << rect.x1 - rect.x0
               << ", " << rect.y1 - rect.y0 << ", facecolor=" << pystr(rect.color)
@@ -1421,6 +1423,8 @@ std::string MatplotlibBackend::generate(const Document& d) const {
                 o << ", transform=ax.transAxes";
             if (screen)
                 o << ", transform=fig.transFigure";
+            if (rect.coordinates == Plot::Rectangle::Coordinates::DataXGraphY)
+                o << ", transform=blended_transform_factory(ax.transData, ax.transAxes)";
             o << ", zorder=" << (rect.behind ? "-1" : "2") << "))\n";
         }
         // Piechart objects and graph-relative labels must use the same square
