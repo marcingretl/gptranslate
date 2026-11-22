@@ -401,3 +401,10 @@ foreach case : ['repeated', 'flat']
            meson.current_build_dir() / ('bma-jointness-' + case + '-palette.py'),
            case])
 endforeach
+
+# Preserve explicit NA samples as gaps in connected lines. The named-data
+# header guards against adding an artificial observation to SVAR HD plots.
+test('inline-missing-lines', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_inline_missing_lines.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'inline-missing-lines.gp',
+         meson.current_build_dir() / 'inline-missing-lines.py'])

@@ -3687,6 +3687,33 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                     size_t row = 0;
                     bool ended = false;
                     size_t named_index = 0;
+                    // Retain missing observations as NaN in connected line styles.
+                    // Dropping these rows would join the points on either side of a gap.
+                    const auto append_missing_line_point =
+                        [&](std::optional<double> x_value,
+                            const std::vector<std::string>& row_cells) {
+                            if (ser.style != Style::Lines && ser.style != Style::LinesPoints &&
+                                ser.style != Style::Steps)
+                                return;
+                            // Named data blocks sometimes start with a textual header.
+                            // It is not a missing observation (SVAR HD regression case).
+                            const bool data_row = std::any_of(
+                                row_cells.begin(), row_cells.end(), [](const std::string& token) {
+                                    if (number(token).has_value())
+                                        return true;
+                                    std::string lower = token;
+                                    std::transform(lower.begin(),
+                                                   lower.end(),
+                                                   lower.begin(),
+                                                   [](unsigned char c) { return std::tolower(c); });
+                                    return lower == "na" || lower == "nan" || token == "?" ||
+                                           token == "*";
+                                });
+                            if (!data_row)
+                                return;
+                            const double missing = std::numeric_limits<double>::quiet_NaN();
+                            ser.points.push_back({x_value.value_or(missing), missing});
+                        };
                     while (true) {
                         std::string dat;
                         if (named_rows) {
@@ -3847,8 +3874,12 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                             auto fy = evaluate_using_field(fields[1], cells);
                             if (fx && fy)
                                 ser.points.push_back({*fx, *fy});
+                            else
+                                append_missing_line_point(fx, cells);
                         } else if (x && y) {
                             ser.points.push_back({*x, *y});
+                        } else {
+                            append_missing_line_point(x, cells);
                         }
                         ++row;
                     }
