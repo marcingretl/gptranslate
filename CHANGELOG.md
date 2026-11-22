@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## [0.13.0] - 2026-11-22
 
-### 0.13.0 release preparation (2026-11-22)
+### Highlights and release verification
 
 - Extended named analytic-function definitions and plotting, including exponentiation,
   piecewise ternary expressions, and styled zero reference axes. These cases are
@@ -16,14 +16,22 @@
   parser; added descending ranges, steps and diagnostic-preservation tests.
 - Improved legend placement below the plot and style parsing for
   `Threshold_Panel`, plus additional real-package geometry and heatmap cases.
-- As of 22 November 2026, **102/102 Meson regression tests passed** on the
+- Preserved explicit missing samples as `NaN` in connected line plots so
+  Matplotlib does not bridge gaps (found via `Imputer`). Text-only headers
+  in named data blocks are still ignored, protecting SVAR historical
+  decomposition plots against spurious observations. Added a regression test.
+- Replaced deprecated MSVC environment-variable reads with a Windows-safe
+  `_dupenv_s()` implementation while keeping portable `getenv()` on other
+  platforms.
+- On 22 November 2026, **103/103 Meson regression tests passed** on the
   maintainer's GNU/Linux environment. The separate gretl4py package audit
-  reached **246/246 reviewed cases and 307 generated figures** through
-  `priority31`. The latter is integration evidence, not pixel-equivalence
-  certification against gnuplot.
-- Windows and macOS verification of the current release candidate remains
-  pending. The project remains a translator for the gretl-oriented subset
-  of gnuplot rather than a general-purpose gnuplot implementation.
+  reached **250/250 reviewed cases and 311 generated figures** through
+  `priority32`, with visual inspection of selected outputs. These results
+  are integration evidence, not pixel-equivalence certification against gnuplot.
+- Compilation succeeded on Windows and macOS. A complete Meson regression
+  run on those two platforms is not documented for this exact release state.
+  gptranslate remains a translator for the gretl-oriented subset of gnuplot,
+  not a general-purpose gnuplot implementation.
 
 
 ### Contributed-package plotting compatibility
