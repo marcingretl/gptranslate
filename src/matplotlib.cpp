@@ -473,18 +473,25 @@ std::string MatplotlibBackend::generate(const Document& d) const {
         if (!p.colors.stops.empty()) {
             const auto& stops = p.colors.stops;
             const double low = stops.front().value, high = stops.back().value;
+            // A palette whose stops all share a position has no range to
+            // normalize. Use its final color as a constant colormap.
+            const bool constant_palette = low == high;
+            const size_t count = constant_palette ? 2 : stops.size();
             o << "cmap = LinearSegmentedColormap.from_list('gnuplot_palette', [";
             o << std::setprecision(17);
-            for (size_t k = 0; k < stops.size(); ++k) {
+            for (size_t k = 0; k < count; ++k) {
                 if (k) {
                     o << ", ";
                 }
-                o << "(" << (stops[k].value - low) / (high - low) << ", ";
-                if (stops[k].rgb) {
-                    const auto& rgb = *stops[k].rgb;
+                const auto& stop = constant_palette ? stops.back() : stops[k];
+                const double position =
+                    constant_palette ? static_cast<double>(k) : (stop.value - low) / (high - low);
+                o << "(" << position << ", ";
+                if (stop.rgb) {
+                    const auto& rgb = *stop.rgb;
                     o << "(" << rgb[0] << ", " << rgb[1] << ", " << rgb[2] << ")";
                 } else {
-                    o << pystr(mpl_color(stops[k].color));
+                    o << pystr(mpl_color(stop.color));
                 }
                 o << ")";
             }
@@ -1370,14 +1377,16 @@ std::string MatplotlibBackend::generate(const Document& d) const {
             // Explicit gnuplot yrange bounds have already been applied above.
             o << "_gp_ymin, _gp_ymax = ax.get_ylim()\n";
             o << "if _gp_ymin <= 0 <= _gp_ymax:\n";
-            o << "    ax.axhline(0, color='gray', linewidth=0.7, zorder=0)\n";
+            o << "    ax.axhline(0, color=" << pystr(mpl_color(p.xzeroaxis_color))
+              << ", linewidth=" << std::setprecision(17) << p.xzeroaxis_width << ", zorder=0)\n";
             o << "    ax.set_ylim(_gp_ymin, _gp_ymax)\n";
         }
         if (p.yzeroaxis) {
             // Likewise the vertical x=0 reference line must not change x limits.
             o << "_gp_xmin, _gp_xmax = ax.get_xlim()\n";
             o << "if _gp_xmin <= 0 <= _gp_xmax:\n";
-            o << "    ax.axvline(0, color='gray', linewidth=0.7, zorder=0)\n";
+            o << "    ax.axvline(0, color=" << pystr(mpl_color(p.yzeroaxis_color))
+              << ", linewidth=" << std::setprecision(17) << p.yzeroaxis_width << ", zorder=0)\n";
             o << "    ax.set_xlim(_gp_xmin, _gp_xmax)\n";
         }
         if (p.box_aspect_ratio)

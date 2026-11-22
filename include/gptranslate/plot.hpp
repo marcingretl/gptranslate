@@ -277,6 +277,10 @@ struct Plot {
     // left, bottom, width, height. Missing value selects default placement.
     std::optional<std::array<double, 4>> colorbox_position;
     bool mirror_tics{true}, xzeroaxis{false}, yzeroaxis{false};
+    // Explicit styles on gnuplot's zero reference axes are independent of
+    // the ordinary series palette and do not change axis autoscaling.
+    std::string xzeroaxis_color{"gray"}, yzeroaxis_color{"gray"};
+    double xzeroaxis_width{0.7}, yzeroaxis_width{0.7};
     // Approximate gnuplot solid fill density for box-style plots.
     double fill_alpha{1.0};
     // Gnuplot rowstacked histograms accumulate each row across series.

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### 0.13.0 release preparation (2026-11-22)
+
+- Extended named analytic-function definitions and plotting, including exponentiation,
+  piecewise ternary expressions, and styled zero reference axes. These cases are
+  exercised by `nic_gig` and checked numerically in the regression suite.
+- Accepted missing-value token `NA` in numerical matrices and non-decreasing
+  palette breakpoint sequences (including repeated and flat stops), with
+  defined behavior for constant palettes. Added dedicated BMA jointness tests.
+- Added mixed data-x/graph-y filled rectangles for shaded intervals, with
+  layering and transparency regression coverage from `ARprobit`.
+- Generalized bounded `set for` expansion through the existing `set` command
+  parser; added descending ranges, steps and diagnostic-preservation tests.
+- Improved legend placement below the plot and style parsing for
+  `Threshold_Panel`, plus additional real-package geometry and heatmap cases.
+- As of 22 November 2026, **102/102 Meson regression tests passed** on the
+  maintainer's GNU/Linux environment. The separate gretl4py package audit
+  reached **246/246 reviewed cases and 307 generated figures** through
+  `priority31`. The latter is integration evidence, not pixel-equivalence
+  certification against gnuplot.
+- Windows and macOS verification of the current release candidate remains
+  pending. The project remains a translator for the gretl-oriented subset
+  of gnuplot rather than a general-purpose gnuplot implementation.
+
+
 ### Contributed-package plotting compatibility
 
 - Verified the complete `priority20` integration suite on 20 November

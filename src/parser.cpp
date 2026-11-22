@@ -43,7 +43,7 @@ namespace {
 std::optional<std::string> analytic_expression(const std::string& input,
                                                const std::map<std::string, double>& variables) {
     static const std::regex token(
-        R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|[+*/()\-])");
+        R"((?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\*\*|==|!=|<=|>=|[+*/()\-<>])");
     std::string result;
     bool contains_x = false;
     int depth = 0;
@@ -101,6 +101,81 @@ std::string trim(std::string s) {
     }
     auto b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
+}
+// Translate a bounded gnuplot conditional `condition ? yes : no` without
+// evaluating source text. Nested ternaries associate to the right, as in
+// gnuplot, and each leaf uses the restricted analytic-expression lexer.
+std::optional<std::string> analytic_piecewise(const std::string& input,
+                                              const std::map<std::string, double>& variables,
+                                              int remaining = 16) {
+    if (remaining <= 0)
+        return std::nullopt;
+    std::string expression = trim(input);
+    // Strip only parentheses that surround the *whole* expression.
+    while (expression.size() > 2 && expression.front() == '(' && expression.back() == ')') {
+        int depth = 0;
+        bool enclosed = true;
+        for (size_t i = 0; i < expression.size(); ++i) {
+            if (expression[i] == '(')
+                ++depth;
+            else if (expression[i] == ')' && --depth == 0 && i + 1 < expression.size()) {
+                enclosed = false;
+                break;
+            }
+            if (depth < 0)
+                return std::nullopt;
+        }
+        if (!enclosed || depth != 0)
+            break;
+        expression = trim(expression.substr(1, expression.size() - 2));
+    }
+    // Find the outermost ternary, ignoring nested parenthesized expressions.
+    int depth = 0;
+    size_t question = std::string::npos;
+    for (size_t i = 0; i < expression.size(); ++i) {
+        if (expression[i] == '(')
+            ++depth;
+        else if (expression[i] == ')')
+            --depth;
+        else if (expression[i] == '?' && depth == 0) {
+            question = i;
+            break;
+        }
+        if (depth < 0)
+            return std::nullopt;
+    }
+    if (question == std::string::npos)
+        return analytic_expression(expression, variables);
+    // The first colon not paired with an inner ternary closes this branch.
+    depth = 0;
+    int pending = 0;
+    size_t colon = std::string::npos;
+    for (size_t i = question + 1; i < expression.size(); ++i) {
+        if (expression[i] == '(')
+            ++depth;
+        else if (expression[i] == ')')
+            --depth;
+        else if (depth == 0 && expression[i] == '?')
+            ++pending;
+        else if (depth == 0 && expression[i] == ':') {
+            if (pending == 0) {
+                colon = i;
+                break;
+            }
+            --pending;
+        }
+        if (depth < 0)
+            return std::nullopt;
+    }
+    if (colon == std::string::npos)
+        return std::nullopt;
+    const auto condition = analytic_expression(trim(expression.substr(0, question)), variables);
+    const auto yes = analytic_piecewise(
+        expression.substr(question + 1, colon - question - 1), variables, remaining - 1);
+    const auto no = analytic_piecewise(expression.substr(colon + 1), variables, remaining - 1);
+    if (!condition || !yes || !no)
+        return std::nullopt;
+    return "((" + *yes + ") if (" + *condition + ") else (" + *no + "))";
 }
 bool starts(const std::string& s, const std::string& p) {
     return s.rfind(p, 0) == 0;
@@ -373,7 +448,7 @@ ImageMatrix parse_matrix(const std::vector<std::string>& rows) {
         while (stream >> cell) {
             // NaN marks an absent matrix cell (e.g. the unused half of a
             // triangular correlation heatmap). Preserve it as missing data.
-            if (cell == "NaN" || cell == "nan" || cell == "NAN") {
+            if (cell == "NaN" || cell == "nan" || cell == "NAN" || cell == "NA" || cell == "na") {
                 values.push_back(std::numeric_limits<double>::quiet_NaN());
                 continue;
             }
@@ -426,7 +501,8 @@ std::vector<std::array<double, 3>> parse_xyz_points(const std::vector<std::strin
             if (!value) {
                 // Gnuplot omits points with undefined numeric coordinates.
                 if (cells[columns[k] - 1] == "NaN" || cells[columns[k] - 1] == "nan" ||
-                    cells[columns[k] - 1] == "NAN" || cells[columns[k] - 1] == "?" ||
+                    cells[columns[k] - 1] == "NAN" || cells[columns[k] - 1] == "NA" ||
+                    cells[columns[k] - 1] == "na" || cells[columns[k] - 1] == "?" ||
                     cells[columns[k] - 1] == "*") {
                     missing = true;
                     break;
@@ -525,8 +601,10 @@ std::vector<PaletteStop> parse_palette(const std::string& definition) {
         } else {
             throw std::runtime_error("invalid palette stop: " + item);
         }
-        if (!stops.empty() && stop.value <= stops.back().value)
-            throw std::runtime_error("palette breakpoints must be strictly increasing");
+        // Equal positions describe a sharp color transition. They are valid
+        // in Gnuplot palettes and in Matplotlib's segmented colormaps.
+        if (!stops.empty() && stop.value < stops.back().value)
+            throw std::runtime_error("palette breakpoints must be nondecreasing");
         stops.push_back(std::move(stop));
     }
     if (stops.size() < 2)
@@ -1343,6 +1421,9 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
     std::map<std::string, std::string> plot_strings;
     // Named cubic functions used by SankeyPlot's '+' sampled ribbons.
     std::map<std::string, std::string> ribbon_functions;
+    // Validated named analytic functions are stored in Python expression form.
+    // They may also occur directly as plot sources, without a data file.
+    std::map<std::string, std::string> analytic_functions;
     std::istringstream input(source);
     std::vector<std::string> lines;
     std::string line;
@@ -1473,14 +1554,26 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
         try {
             // Restricted named functions in SankeyPlot are cubic polynomials
             // of x. Reject definitions containing unsupported expressions.
+            // The same assignment syntax also defines general validated
+            // analytic and piecewise f(x) curves, such as NIC functions.
             std::smatch ribbon_definition;
             static const std::regex ribbon_re(R"(^([A-Za-z_][A-Za-z0-9_]*)\(x\)\s*=\s*(.+)$)");
             if (std::regex_match(s, ribbon_definition, ribbon_re)) {
                 const std::string name = ribbon_definition[1].str();
                 const std::string formula = ribbon_definition[2].str();
-                for (double sample : {0.0, 0.5, 1.0})
-                    (void)scalar_value(formula, {{"x", sample}});
-                ribbon_functions[name] = formula;
+                const auto converted = analytic_piecewise(formula, plot_scalars);
+                if (!converted)
+                    throw std::runtime_error("unsupported named analytic function: " + s);
+                analytic_functions[name] = *converted;
+                // Retain the original numeric formula for SankeyPlot's sampled
+                // ribbons, which use a separate scalar evaluator.
+                try {
+                    for (double sample : {0.0, 0.5, 1.0})
+                        (void)scalar_value(formula, {{"x", sample}});
+                    ribbon_functions[name] = formula;
+                } catch (const std::runtime_error&) {
+                    ribbon_functions.erase(name);
+                }
                 continue;
             }
             // Preserve active scalar assignments in the plotting environment.
@@ -1700,8 +1793,21 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 p->axis_offsets.reset();
                 continue;
             }
-            if (s == "set xzeroaxis") {
+            if (s == "set xzeroaxis" || starts(s, "set xzeroaxis ")) {
                 p->xzeroaxis = true;
+                // Preserve the optional reference-line color and width.
+                // A negative `lt` selects the axis style, not a palette index.
+                if (const auto color = keyword_value(s, "lc rgb"); !color.empty())
+                    p->xzeroaxis_color = color;
+                auto width = keyword_value(s, "lw");
+                if (width.empty())
+                    width = keyword_value(s, "linewidth");
+                if (!width.empty()) {
+                    const auto numeric = number(width);
+                    if (!numeric || *numeric <= 0)
+                        throw std::runtime_error("invalid xzeroaxis width: " + s);
+                    p->xzeroaxis_width = *numeric;
+                }
                 continue;
             }
             if (s == "unset xzeroaxis" || s == "set noxzeroaxis") {
@@ -1709,8 +1815,19 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                 continue;
             }
             // `yzeroaxis` is the vertical reference axis x=0 (not y=0).
-            if (s == "set yzeroaxis") {
+            if (s == "set yzeroaxis" || starts(s, "set yzeroaxis ")) {
                 p->yzeroaxis = true;
+                if (const auto color = keyword_value(s, "lc rgb"); !color.empty())
+                    p->yzeroaxis_color = color;
+                auto width = keyword_value(s, "lw");
+                if (width.empty())
+                    width = keyword_value(s, "linewidth");
+                if (!width.empty()) {
+                    const auto numeric = number(width);
+                    if (!numeric || *numeric <= 0)
+                        throw std::runtime_error("invalid yzeroaxis width: " + s);
+                    p->yzeroaxis_width = *numeric;
+                }
                 continue;
             }
             if (s == "unset yzeroaxis" || s == "set noyzeroaxis") {
@@ -3172,6 +3289,26 @@ ParseResult parse(const std::string& source, const std::string& source_path) {
                             }
                         const auto formula = trim(spec.substr(0, expr_end));
                         analytic_value = analytic_expression(formula, plot_scalars);
+                        // A validated named function is an analytic source, not
+                        // a filename. Expand it only for a restricted argument
+                        // containing x; no Python-level function is executed.
+                        if (!analytic_value) {
+                            std::smatch call;
+                            static const std::regex named_call(
+                                R"(^([A-Za-z_][A-Za-z_0-9]*)\s*\((.*)\)$)");
+                            if (std::regex_match(formula, call, named_call)) {
+                                if (const auto it = analytic_functions.find(call[1].str());
+                                    it != analytic_functions.end()) {
+                                    if (const auto argument =
+                                            analytic_expression(call[2].str(), plot_scalars)) {
+                                        analytic_value =
+                                            std::regex_replace(it->second,
+                                                               std::regex(R"(\bvalue\b)"),
+                                                               "(" + *argument + ")");
+                                    }
+                                }
+                            }
+                        }
                         // gretl's FREQ gamma overlay is written as products of
                         // huge powers and gamma functions. Evaluate its log-density
                         // instead: direct exponentiation overflows for large alpha.

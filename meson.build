@@ -381,3 +381,23 @@ test('arprobit-recession-bands', py,
   args: [meson.current_source_dir() / 'tests' / 'check_arprobit_recession_bands.py',
          exe.full_path(), meson.current_source_dir() / 'tests' / 'arprobit-recession-bands.gp',
          meson.current_build_dir() / 'arprobit-recession-bands.py'])
+
+# nic_gig defines two analytic functions, including a piecewise ternary NIC.
+# Verify curves numerically, preserve optional zero-axis styles, and reject
+# untrusted function bodies before generating any Python output.
+test('nic-gig-named-piecewise-functions', py,
+  args: [meson.current_source_dir() / 'tests' / 'check_nic_gig_functions.py',
+         exe.full_path(), meson.current_source_dir() / 'tests' / 'nic-gig-functions.gp',
+         meson.current_build_dir() / 'nic-gig-functions.py',
+         meson.current_source_dir() / 'tests' / 'nic-gig-invalid-functions.gp'])
+
+# BMA jointness may emit NA diagonal cells and repeated/constant palette stops.
+# Execute the generated Python to catch invalid colormap normalization.
+foreach case : ['repeated', 'flat']
+  test('bma-jointness-' + case + '-palette', py,
+    args: [meson.current_source_dir() / 'tests' / 'check_bma_jointness_palette.py',
+           exe.full_path(),
+           meson.current_source_dir() / 'tests' / ('bma-jointness-' + case + '-palette.gp'),
+           meson.current_build_dir() / ('bma-jointness-' + case + '-palette.py'),
+           case])
+endforeach
