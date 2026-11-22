@@ -25,12 +25,31 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 namespace fs = std::filesystem;
 namespace {
+// Return an owned copy of an environment variable. MSVC deprecates getenv(),
+// so use the secure CRT there without suppressing compiler diagnostics.
+std::string read_environment(const char* name) {
+#ifdef _MSC_VER
+    char* raw = nullptr;
+    std::size_t length = 0;
+    const errno_t status = _dupenv_s(&raw, &length, name);
+    // Free the CRT allocation even if constructing the string throws.
+    std::unique_ptr<char, decltype(&std::free)> copy(raw, &std::free);
+    if (status != 0) {
+        throw std::runtime_error(std::string("cannot read environment variable: ") + name);
+    }
+    return copy ? std::string(copy.get()) : std::string();
+#else
+    const char* value = std::getenv(name);
+    return value ? std::string(value) : std::string();
+#endif
+}
 // Read the complete gnuplot source, preserving its inline data.
 std::string read_file(const fs::path& path) {
     std::ifstream file(path, std::ios::binary);
@@ -201,20 +220,19 @@ int main(int argc, char** argv) {
         }
         // Auto-contrast is the default for combined plots. The environment
         // can override it, while an explicit CLI option takes precedence.
-        const char* contrast_env = std::getenv("GPTRANSLATE_AUTO_CONTRAST");
-        if (!contrast_cli_override && contrast_env != nullptr) {
-            const std::string value(contrast_env);
-            if (value == "0")
+        const std::string contrast_env = read_environment("GPTRANSLATE_AUTO_CONTRAST");
+        if (!contrast_cli_override) {
+            if (contrast_env == "0")
                 auto_contrast = false;
-            else if (value == "1")
+            else if (contrast_env == "1")
                 auto_contrast = true;
         }
         gptranslate::MatplotlibBackend backend(auto_contrast, show, backend_name);
         const std::string python = backend.generate(result.document);
         // Queue only libgretl's interactive invocations. Explicit --output
         // retains ordinary file output; scripts are display-neutral by default.
-        const char* queue = std::getenv("GRETL4PY_PLOT_QUEUE");
-        if (persist && output.empty() && queue != nullptr && *queue != '\0') {
+        const std::string queue = read_environment("GRETL4PY_PLOT_QUEUE");
+        if (persist && output.empty() && !queue.empty()) {
             // Queue publication is sufficient; callers do not consume a path on
             // stdout.
             enqueue_python(fs::path(queue), python);
