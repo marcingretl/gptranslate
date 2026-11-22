@@ -1,0 +1,17 @@
+# Python
+*.py text eol=lf
+
+# C and C++
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+
+# Build scripts and documentation
+meson.build text eol=lf
+*.md text eol=lf
+
+# Gnuplot scripts
+*.gp text eol=lf
+*.plt text eol=lf
+
