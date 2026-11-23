@@ -345,10 +345,13 @@ std::string MatplotlibBackend::generate(const Document& d) const {
     if (!backend_name_.empty()) {
         // Select the requested backend before importing pyplot.
         // This affects the generated script, not the translator process.
+#ifdef _WIN32
         if (backend_name_ == "QtAgg") {
-            // Prefer PySide6 for the QtAgg backend when it is requested explicitly.
+            // Force PySide6 on Windows to ensure consistent Qt object lifetime.
             o << "from PySide6 import QtCore\n";
         }
+#endif
+        // On other platforms, Matplotlib selects the available Qt binding.
         o << "import matplotlib\n";
         o << "matplotlib.use(" << pystr(backend_name_) << ")\n";
     }

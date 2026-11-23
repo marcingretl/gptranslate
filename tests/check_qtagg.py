@@ -24,10 +24,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert 'from PySide6 import QtCore' not in default
     assert 'plt.show()' not in default
 
-    header = ("from PySide6 import QtCore\n"
-              "import matplotlib\n"
-              "matplotlib.use('QtAgg')\n"
-              "import matplotlib.pyplot as plt\n")
+    # Windows requires PySide6 for consistent Qt object lifetime.
+    # On other platforms, Matplotlib selects an available Qt binding.
+    header = (
+        ("from PySide6 import QtCore\n" if sys.platform == "win32" else "")
+        + "import matplotlib\n"
+        + "matplotlib.use('QtAgg')\n"
+        + "import matplotlib.pyplot as plt\n"
+    )
     qtagg = generate('--backend=QtAgg')
     assert qtagg.startswith(header)
     assert 'plt.show()' not in qtagg
