@@ -1,4 +1,4 @@
-project('gptranslate', 'cpp', version: '0.13.0', default_options: ['cpp_std=c++17', 'warning_level=2'])
+project('gptranslate', 'cpp', version: '0.13.1-git', default_options: ['cpp_std=c++17', 'warning_level=2'])
 # Older libstdc++ versions (notably GCC 8) require -lstdc++fs for C++17
 # std::filesystem. Test the actual link rather than the compiler version,
 # since Clang can also use an older libstdc++ implementation.

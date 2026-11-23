@@ -34,6 +34,12 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     qt_agg = generate('--backend=QtAgg')
     assert qt_agg.startswith(header)
+    # Windows must retain the explicit PySide6 import for Qt object lifetime.
+    # Other platforms must leave Qt binding selection to Matplotlib.
+    if sys.platform == 'win32':
+        assert qt_agg.startswith('from PySide6 import QtCore\n')
+    else:
+        assert 'from PySide6 import QtCore' not in qt_agg
     assert 'plt.show()' not in qt_agg
     assert qt_agg[len(header):] == default[len('import matplotlib.pyplot as plt\n'):]
 
